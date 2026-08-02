@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Auth ----------
+
+enum ManagerRole {
+  ADMIN
+  MANAGER
+}
+
+model ManagerUser {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  passwordHash String
+  name         String
+  role         ManagerRole @default(MANAGER)
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+// ---------- ZenHR OAuth ----------
+
+// Single-row table holding the current OAuth tokens for our ZenHR
+// integration app. Bootstrapped once via the /connect-zenhr admin flow,
+// refreshed automatically afterwards using refreshToken.
+model ZenhrOAuthToken {
+  id           String   @id @default("default")
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  scope        String
+  updatedAt    DateTime @updatedAt
+}
+
+// ---------- Branches ----------
+
+model Branch {
+  id          Int      @id // ZenHR branch id
+  nameEn      String
+  timezone    String
+  workingHours Float
+  daysOff     Int[] // ISO-ish weekday numbers ZenHR considers off, e.g. [5,6]
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------- Employees ----------
+
+model Employee {
+  id               String    @id @default(cuid())
+  zenhrEmployeeId  Int       @unique
+  zenhrBranchId    Int
+  employmentNumber String
+  firstNameEn      String
+  lastNameEn       String
+  displayNameEn    String
+  active           Boolean   @default(true)
+  hiringDate       DateTime? @db.Date
+  terminationDate  DateTime? @db.Date
+
+  // Bricks (visits) linkage - phase 2, but schema ready now.
+  // Populated either by matching displayNameEn to a Bricks owner name,
+  // or via the manual override table below for the known name mismatches.
+  bricksUserId      String?
+  bricksDisplayName String?
+
+  attendanceRecords AttendanceRecord[]
+  visits            Visit[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([zenhrBranchId])
+  @@index([employmentNumber])
+}
+
+// Manual name-mapping overrides for employees whose Bricks name differs
+// from their ZenHR name (e.g. "Kareem Elsobky" in Bricks -> ZenHR
+// employment_number 115 "Karim Ahmed"). Seeded from the mapping list
+// provided by the business; used to resolve Bricks visits to the right
+// ZenHR employee when the names don't match automatically.
+model EmployeeNameOverride {
+  id                String   @id @default(cuid())
+  employmentNumber  String   @unique
+  bricksDisplayName String
+  note              String?
+  createdAt         DateTime @default(now())
+}
+
+// ---------- Attendance (ZenHR) ----------
+
+model AttendanceRecord {
+  id               String   @id @default(cuid())
+  employeeId       String
+  employee         Employee @relation(fields: [employeeId], references: [id])
+  zenhrRecordId    Int      @unique
+  attendanceDate   DateTime @db.Date
+  entryTime        DateTime?
+  exitTime         DateTime?
+  missingStatus    String
+  numberOfMissings Int      @default(0)
+  suspicious       Boolean  @default(false)
+  workedMinutes    Int?
+
+  sourceUpdatedAt DateTime
+  syncedAt        DateTime @default(now())
+
+  @@index([employeeId, attendanceDate])
+  @@index([attendanceDate])
+}
+
+// ---------- Visits (Bricks) - phase 2 ----------
+
+model Visit {
+  id              String   @id @default(cuid())
+  bricksVisitId   String   @unique
+  employeeId      String?
+  employee        Employee? @relation(fields: [employeeId], references: [id])
+  ownerBricksId   String
+  ownerNameRaw    String
+  contactId       String?
+  contactName     String?
+  isSuccessful    Boolean?
+  isPlanned       Boolean
+  status          String
+  visitTime       DateTime
+  durationMs      Int?
+
+  syncedAt DateTime @default(now())
+
+  @@index([employeeId, visitTime])
+  @@index([ownerBricksId])
+}
+
+// ---------- Sync bookkeeping ----------
+
+enum SyncSource {
+  ZENHR
+  BRICKS
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+model SyncRun {
+  id             String     @id @default(cuid())
+  source         SyncSource
+  status         SyncStatus @default(RUNNING)
+  startedAt      DateTime   @default(now())
+  finishedAt     DateTime?
+  recordsSynced  Int        @default(0)
+  errorMessage   String?
+}
