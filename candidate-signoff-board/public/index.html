@@ -569,9 +569,16 @@ function renderEditForm(c){
       <button type="button" class="add-row-btn" onclick="addEditCriteriaRow('${c.id}')">+ Add criterion</button>
     </div>
 
-    <div class="field">
-      <label>CV link (optional)</label>
-      <input type="text" id="edit-cvlink-${c.id}" value="${escapeHtml(c.cvLink || '')}">
+    <div class="field-row">
+      <div class="field">
+        <label>Replace CV file (optional)</label>
+        <input type="file" id="edit-cv-${c.id}" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg">
+        <div class="hint">${c.hasCv ? 'Currently has a CV file' + (c.cvFileName ? ' — ' + escapeHtml(c.cvFileName) : '') + '. Choosing a new file replaces it.' : 'Under ~3.5MB. For bigger files, use the link field instead.'}</div>
+      </div>
+      <div class="field">
+        <label>Or CV link (optional)</label>
+        <input type="text" id="edit-cvlink-${c.id}" value="${escapeHtml(c.cvLink || '')}" placeholder="Drive / Wuzzuf / etc. link">
+      </div>
     </div>
 
     <div id="edit-msg-${c.id}"></div>
@@ -618,11 +625,18 @@ async function submitEdit(id){
   const role = document.getElementById('edit-role-' + id).value.trim();
   const notes = document.getElementById('edit-notes-' + id).value.trim();
   const cvLink = document.getElementById('edit-cvlink-' + id).value.trim();
+  const fileInput = document.getElementById('edit-cv-' + id);
   const msgEl = document.getElementById('edit-msg-' + id);
   const btn = document.getElementById('edit-submit-' + id);
 
   if(!name || !role){
     msgEl.innerHTML = '<div class="form-msg error">Name and role are required.</div>';
+    return;
+  }
+
+  const file = fileInput.files[0];
+  if(file && file.size > 3.6 * 1024 * 1024){
+    msgEl.innerHTML = '<div class="form-msg error">That file is too large to store here — use the CV link field instead.</div>';
     return;
   }
 
@@ -635,15 +649,20 @@ async function submitEdit(id){
 
   btn.disabled = true; btn.textContent = 'Saving…';
   try{
+    const payload = {
+      name, role, notes,
+      score: editScores[id] || null,
+      criteria,
+      cvLink: cvLink || null
+    };
+    if(file){
+      payload.cvFileName = file.name;
+      payload.cvBase64 = await fileToBase64(file);
+    }
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name, role, notes,
-        score: editScores[id] || null,
-        criteria,
-        cvLink: cvLink || null
-      })
+      body: JSON.stringify(payload)
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     toggleEdit(id);

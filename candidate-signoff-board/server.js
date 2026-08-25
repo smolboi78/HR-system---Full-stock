@@ -167,6 +167,10 @@ app.patch('/candidates/:id', (req, res) => {
   if (body.score !== undefined) next.score = Number.isInteger(body.score) ? body.score : null;
   if (body.criteria !== undefined) next.criteria = JSON.stringify(Array.isArray(body.criteria) ? body.criteria : []);
   if (body.cvLink !== undefined) next.cvLink = body.cvLink ? String(body.cvLink) : null;
+  if (body.cvFileName !== undefined && body.cvBase64 !== undefined) {
+    next.cvFileName = body.cvFileName || null;
+    next.cvBase64 = body.cvBase64 || null;
+  }
   if (body.reviewNotes !== undefined) next.reviewNotes = body.reviewNotes ? String(body.reviewNotes) : null;
 
   stmts.update.run({
