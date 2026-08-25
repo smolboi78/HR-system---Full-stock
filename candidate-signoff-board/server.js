@@ -29,10 +29,16 @@ db.exec(`
   );
 `);
 
-// Non-destructive migration for databases created before reviewNotes existed.
+// Non-destructive migrations for databases created before these columns existed.
 const existingColumns = db.prepare('PRAGMA table_info(candidates)').all().map((c) => c.name);
 if (!existingColumns.includes('reviewNotes')) {
   db.exec('ALTER TABLE candidates ADD COLUMN reviewNotes TEXT');
+}
+if (!existingColumns.includes('onHold')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN onHold INTEGER NOT NULL DEFAULT 0');
+}
+if (!existingColumns.includes('holdNote')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN holdNote TEXT');
 }
 
 const stmts = {
@@ -41,15 +47,16 @@ const stmts = {
   getCv: db.prepare('SELECT cvFileName, cvBase64 FROM candidates WHERE id = ?'),
   insert: db.prepare(`
     INSERT INTO candidates
-      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes)
+      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote)
     VALUES
-      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes)
+      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote)
   `),
   update: db.prepare(`
     UPDATE candidates SET
       name = @name, role = @role, notes = @notes, score = @score, criteria = @criteria,
       status = @status, cvFileName = @cvFileName, cvBase64 = @cvBase64, cvLink = @cvLink,
-      decidedAt = @decidedAt, decisionComment = @decisionComment, reviewNotes = @reviewNotes
+      decidedAt = @decidedAt, decisionComment = @decisionComment, reviewNotes = @reviewNotes,
+      onHold = @onHold, holdNote = @holdNote
     WHERE id = @id
   `),
   remove: db.prepare('DELETE FROM candidates WHERE id = ?'),
@@ -74,6 +81,8 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
       ? { decidedAt: row.decidedAt, comment: row.decisionComment || '' }
       : null,
     reviewNotes: row.reviewNotes || '',
+    onHold: !!row.onHold,
+    holdNote: row.holdNote || '',
   };
   if (includeCv) {
     candidate.cvBase64 = row.cvBase64 || null;
@@ -122,6 +131,8 @@ app.post('/candidates', (req, res) => {
     decidedAt: null,
     decisionComment: null,
     reviewNotes: null,
+    onHold: 0,
+    holdNote: null,
   };
 
   stmts.insert.run(row);
@@ -147,6 +158,13 @@ app.patch('/candidates/:id', (req, res) => {
     next.decisionComment = body.status === 'pending'
       ? null
       : (body.decisionComment ? String(body.decisionComment) : (existing.decisionComment || ''));
+
+    // A hold is a pending-only concern — clear it once a real decision is made,
+    // unless this same request is also explicitly setting the hold.
+    if (body.status !== 'pending' && body.onHold === undefined) {
+      next.onHold = 0;
+      next.holdNote = null;
+    }
   }
 
   if (body.name !== undefined) {
@@ -172,6 +190,8 @@ app.patch('/candidates/:id', (req, res) => {
     next.cvBase64 = body.cvBase64 || null;
   }
   if (body.reviewNotes !== undefined) next.reviewNotes = body.reviewNotes ? String(body.reviewNotes) : null;
+  if (body.onHold !== undefined) next.onHold = body.onHold ? 1 : 0;
+  if (body.holdNote !== undefined) next.holdNote = body.holdNote ? String(body.holdNote) : null;
 
   stmts.update.run({
     id: next.id,
@@ -187,6 +207,8 @@ app.patch('/candidates/:id', (req, res) => {
     decidedAt: next.decidedAt,
     decisionComment: next.decisionComment,
     reviewNotes: next.reviewNotes,
+    onHold: next.onHold,
+    holdNote: next.holdNote,
   });
 
   const updated = stmts.getById.get(req.params.id);

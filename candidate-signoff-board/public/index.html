@@ -213,22 +213,32 @@
   .cv-btn:hover{ background:var(--line); }
   .cv-link-text{ font-size:12px; color:var(--brand-light); word-break:break-all; }
 
-  .decision-actions{ display:flex; gap:8px; }
-  .approve-btn, .reject-btn{
+  .decision-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .approve-btn, .reject-btn, .hold-btn{
     border:none; border-radius:7px; padding:8px 16px; font-size:12.5px; font-weight:700; color:#fff;
   }
   .approve-btn{ background:var(--approve); }
   .approve-btn:hover{ background:#2E6349; }
   .reject-btn{ background:var(--reject); }
   .reject-btn:hover{ background:#93412F; }
+  .hold-btn{ background:var(--pending); }
+  .hold-btn:hover{ background:#A97723; }
+
+  .hold-tag{
+    display:inline-block; margin-top:4px;
+    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;
+    padding:2px 9px; border-radius:20px;
+    background:var(--pending-bg); color:var(--pending);
+  }
 
   .reject-note{
     width:100%; margin-top:8px; display:none;
   }
   .reject-note.show{ display:block; }
   .reject-note textarea{ min-height:44px; }
-  .reject-note .mini-actions{ display:flex; gap:8px; margin-top:6px; }
+  .reject-note .mini-actions{ display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; }
   .mini-confirm{ background:var(--reject); color:#fff; border:none; border-radius:6px; padding:6px 12px; font-size:12px; font-weight:700; }
+  .mini-confirm.hold{ background:var(--pending); }
   .mini-cancel{ background:none; border:1px solid var(--line-strong); border-radius:6px; padding:6px 12px; font-size:12px; }
 
   /* decided stamp */
@@ -447,6 +457,7 @@ function renderCard(c, ceoActions){
   if(ceoActions){
     bottom += `<div class="decision-actions">
       <button class="approve-btn" onclick="decide('${c.id}','approved')">Approve</button>
+      <button class="hold-btn" onclick="toggleHoldNote('${c.id}')">${c.onHold ? 'Update hold' : 'On hold'}</button>
       <button class="reject-btn" onclick="toggleRejectNote('${c.id}')">Reject</button>
     </div>`;
   }
@@ -469,6 +480,18 @@ function renderCard(c, ceoActions){
     </div>`;
   }
 
+  let holdNoteBlock = '';
+  if(ceoActions){
+    holdNoteBlock = `<div class="reject-note" id="hn-${c.id}">
+      <textarea id="hn-text-${c.id}" placeholder="Optional note about why this is on hold">${escapeHtml(c.holdNote || '')}</textarea>
+      <div class="mini-actions">
+        <button class="mini-confirm hold" onclick="confirmHold('${c.id}')">${c.onHold ? 'Update hold' : 'Confirm hold'}</button>
+        <button class="mini-cancel" onclick="toggleHoldNote('${c.id}')">Cancel</button>
+        ${c.onHold ? `<button class="mini-cancel" onclick="removeHold('${c.id}')">Remove hold</button>` : ''}
+      </div>
+    </div>`;
+  }
+
   let reviewNotesBlock = '';
   if(ceoActions){
     reviewNotesBlock = `<div class="field" style="margin-top:10px;">
@@ -481,6 +504,11 @@ function renderCard(c, ceoActions){
   }else if(c.reviewNotes){
     reviewNotesBlock = `<div class="decision-comment">Reviewer notes: "${escapeHtml(c.reviewNotes)}"</div>`;
   }
+
+  const holdTag = c.onHold ? `<span class="hold-tag">On hold</span>` : '';
+  const holdNoteDisplay = (!ceoActions && c.onHold && c.holdNote)
+    ? `<div class="decision-comment">On hold: "${escapeHtml(c.holdNote)}"</div>`
+    : '';
 
   let stamp = '';
   let decisionComment = '';
@@ -501,15 +529,18 @@ function renderCard(c, ceoActions){
       <div>
         <div class="card-name">${escapeHtml(c.name)}</div>
         <div class="card-meta">${daysAgo(c.dateAdded)}${c.status !== 'pending' ? ' · decided ' + (c.decision && c.decision.decidedAt ? new Date(c.decision.decidedAt).toLocaleDateString() : '') : ''}</div>
+        ${holdTag}
       </div>
       ${c.score ? `<div class="score-badge">${c.score}/5</div>` : ''}
     </div>
     ${c.notes ? `<div class="card-notes">${escapeHtml(c.notes)}</div>` : ''}
     ${criteriaHtml ? `<div class="criteria-list">${criteriaHtml}</div>` : ''}
     ${decisionComment}
+    ${holdNoteDisplay}
     ${reviewNotesBlock}
     ${bottom}
     ${rejectNoteBlock}
+    ${holdNoteBlock}
     ${editBlock}
   </div>`;
 }
@@ -517,6 +548,44 @@ function renderCard(c, ceoActions){
 function toggleRejectNote(id){
   const el = document.getElementById('rn-' + id);
   if(el) el.classList.toggle('show');
+}
+
+/* ============ On hold (CEO) ============ */
+function toggleHoldNote(id){
+  const el = document.getElementById('hn-' + id);
+  if(el) el.classList.toggle('show');
+}
+
+async function confirmHold(id){
+  const el = document.getElementById('hn-text-' + id);
+  const holdNote = el ? el.value.trim() : '';
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ onHold: true, holdNote })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Marked on hold');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not save — try again');
+  }
+}
+
+async function removeHold(id){
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ onHold: false, holdNote: '' })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Hold removed');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not save — try again');
+  }
 }
 
 /* ============ Edit candidate (HR) ============ */
