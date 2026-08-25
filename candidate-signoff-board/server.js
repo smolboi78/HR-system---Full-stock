@@ -29,17 +29,29 @@ db.exec(`
   );
 `);
 
+// Non-destructive migration for databases created before reviewNotes existed.
+const existingColumns = db.prepare('PRAGMA table_info(candidates)').all().map((c) => c.name);
+if (!existingColumns.includes('reviewNotes')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN reviewNotes TEXT');
+}
+
 const stmts = {
   list: db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC'),
   getById: db.prepare('SELECT * FROM candidates WHERE id = ?'),
   getCv: db.prepare('SELECT cvFileName, cvBase64 FROM candidates WHERE id = ?'),
   insert: db.prepare(`
     INSERT INTO candidates
-      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment)
+      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes)
     VALUES
-      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment)
+      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes)
   `),
-  updateStatus: db.prepare('UPDATE candidates SET status = ?, decidedAt = ?, decisionComment = ? WHERE id = ?'),
+  update: db.prepare(`
+    UPDATE candidates SET
+      name = @name, role = @role, notes = @notes, score = @score, criteria = @criteria,
+      status = @status, cvFileName = @cvFileName, cvBase64 = @cvBase64, cvLink = @cvLink,
+      decidedAt = @decidedAt, decisionComment = @decisionComment, reviewNotes = @reviewNotes
+    WHERE id = @id
+  `),
   remove: db.prepare('DELETE FROM candidates WHERE id = ?'),
 };
 
@@ -61,6 +73,7 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
     decision: row.status !== 'pending'
       ? { decidedAt: row.decidedAt, comment: row.decisionComment || '' }
       : null,
+    reviewNotes: row.reviewNotes || '',
   };
   if (includeCv) {
     candidate.cvBase64 = row.cvBase64 || null;
@@ -108,6 +121,7 @@ app.post('/candidates', (req, res) => {
     cvLink: cvLink || null,
     decidedAt: null,
     decisionComment: null,
+    reviewNotes: null,
   };
 
   stmts.insert.run(row);
@@ -121,15 +135,55 @@ app.patch('/candidates/:id', (req, res) => {
     return res.status(404).json({ error: 'Candidate not found' });
   }
 
-  const { status, decisionComment } = req.body || {};
-  if (!status || !STATUSES.includes(status)) {
-    return res.status(400).json({ error: `status must be one of ${STATUSES.join(', ')}` });
+  const body = req.body || {};
+  const next = { ...existing };
+
+  if (body.status !== undefined) {
+    if (!STATUSES.includes(body.status)) {
+      return res.status(400).json({ error: `status must be one of ${STATUSES.join(', ')}` });
+    }
+    next.status = body.status;
+    next.decidedAt = body.status === 'pending' ? null : new Date().toISOString();
+    next.decisionComment = body.status === 'pending'
+      ? null
+      : (body.decisionComment ? String(body.decisionComment) : (existing.decisionComment || ''));
   }
 
-  const decidedAt = status === 'pending' ? null : new Date().toISOString();
-  const comment = status === 'pending' ? null : (decisionComment ? String(decisionComment) : '');
+  if (body.name !== undefined) {
+    if (!String(body.name).trim()) {
+      return res.status(400).json({ error: 'Name cannot be empty.' });
+    }
+    next.name = String(body.name).trim();
+  }
 
-  stmts.updateStatus.run(status, decidedAt, comment, req.params.id);
+  if (body.role !== undefined) {
+    if (!String(body.role).trim()) {
+      return res.status(400).json({ error: 'Role cannot be empty.' });
+    }
+    next.role = String(body.role).trim();
+  }
+
+  if (body.notes !== undefined) next.notes = body.notes ? String(body.notes) : null;
+  if (body.score !== undefined) next.score = Number.isInteger(body.score) ? body.score : null;
+  if (body.criteria !== undefined) next.criteria = JSON.stringify(Array.isArray(body.criteria) ? body.criteria : []);
+  if (body.cvLink !== undefined) next.cvLink = body.cvLink ? String(body.cvLink) : null;
+  if (body.reviewNotes !== undefined) next.reviewNotes = body.reviewNotes ? String(body.reviewNotes) : null;
+
+  stmts.update.run({
+    id: next.id,
+    name: next.name,
+    role: next.role,
+    notes: next.notes,
+    score: next.score,
+    criteria: next.criteria,
+    status: next.status,
+    cvFileName: next.cvFileName,
+    cvBase64: next.cvBase64,
+    cvLink: next.cvLink,
+    decidedAt: next.decidedAt,
+    decisionComment: next.decisionComment,
+    reviewNotes: next.reviewNotes,
+  });
 
   const updated = stmts.getById.get(req.params.id);
   res.json(rowToCandidate(updated));

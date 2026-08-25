@@ -319,6 +319,9 @@ let candidates = [];             // array of meta objects
 let pollTimer = null;
 let criteriaRowCount = 0;
 let currentScore = 0;
+let editingId = null;            // candidate id currently open in the edit form, or null
+const editScores = {};           // per-candidate score while editing
+const editCriteriaCount = {};    // per-candidate criteria row counter while editing
 
 /* ============ Utilities ============ */
 function escapeHtml(str){
@@ -447,6 +450,9 @@ function renderCard(c, ceoActions){
       <button class="reject-btn" onclick="toggleRejectNote('${c.id}')">Reject</button>
     </div>`;
   }
+  if(currentRole === 'hr'){
+    bottom += `<button class="handled-btn" onclick="toggleEdit('${c.id}')">${editingId === c.id ? 'Cancel edit' : 'Edit'}</button>`;
+  }
   if(currentRole === 'hr' && c.status !== 'pending'){
     bottom += `<button class="handled-btn" onclick="markHandled('${c.id}')">Mark handled — remove</button>`;
   }
@@ -463,6 +469,19 @@ function renderCard(c, ceoActions){
     </div>`;
   }
 
+  let reviewNotesBlock = '';
+  if(ceoActions){
+    reviewNotesBlock = `<div class="field" style="margin-top:10px;">
+      <label for="rev-notes-${c.id}">Your notes (optional)</label>
+      <textarea id="rev-notes-${c.id}" placeholder="Private notes for this candidate — not shown as a decision reason">${escapeHtml(c.reviewNotes || '')}</textarea>
+      <div class="mini-actions">
+        <button class="mini-cancel" onclick="saveReviewNotes('${c.id}')">Save note</button>
+      </div>
+    </div>`;
+  }else if(c.reviewNotes){
+    reviewNotesBlock = `<div class="decision-comment">Reviewer notes: "${escapeHtml(c.reviewNotes)}"</div>`;
+  }
+
   let stamp = '';
   let decisionComment = '';
   if(c.status === 'approved'){
@@ -473,6 +492,8 @@ function renderCard(c, ceoActions){
       decisionComment = `<div class="decision-comment">"${escapeHtml(c.decision.comment)}"</div>`;
     }
   }
+
+  const editBlock = (currentRole === 'hr' && editingId === c.id) ? renderEditForm(c) : '';
 
   return `<div class="card status-${c.status}">
     ${stamp}
@@ -486,14 +507,168 @@ function renderCard(c, ceoActions){
     ${c.notes ? `<div class="card-notes">${escapeHtml(c.notes)}</div>` : ''}
     ${criteriaHtml ? `<div class="criteria-list">${criteriaHtml}</div>` : ''}
     ${decisionComment}
+    ${reviewNotesBlock}
     ${bottom}
     ${rejectNoteBlock}
+    ${editBlock}
   </div>`;
 }
 
 function toggleRejectNote(id){
   const el = document.getElementById('rn-' + id);
   if(el) el.classList.toggle('show');
+}
+
+/* ============ Edit candidate (HR) ============ */
+function toggleEdit(id){
+  editingId = (editingId === id) ? null : id;
+  if(editingId){
+    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+  }else{
+    delete editScores[id];
+    delete editCriteriaCount[id];
+    if(!pollTimer) pollTimer = setInterval(loadCandidates, 20000);
+  }
+  renderBoard();
+}
+
+function renderEditForm(c){
+  if(!(c.id in editScores)) editScores[c.id] = c.score || 0;
+  const rows = (c.criteria && c.criteria.length) ? c.criteria : [{q:'',verdict:'Meets'}];
+  if(!(c.id in editCriteriaCount)) editCriteriaCount[c.id] = rows.length;
+  const rowsHtml = rows.map((row, i) => editCriteriaRowHtml(c.id, i, row)).join('');
+
+  return `<div class="panel" style="margin-top:12px;">
+    <h2>Edit candidate</h2>
+    <div class="field-row">
+      <div class="field">
+        <label>Candidate name</label>
+        <input type="text" id="edit-name-${c.id}" value="${escapeHtml(c.name)}">
+      </div>
+      <div class="field">
+        <label>Role</label>
+        <input type="text" id="edit-role-${c.id}" value="${escapeHtml(c.role)}">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Screening score</label>
+      <div class="score-picker" id="edit-scorePicker-${c.id}">
+        ${[1,2,3,4,5].map(n => `<div class="score-dot${n <= editScores[c.id] ? ' active' : ''}" data-n="${n}" onclick="setEditScore('${c.id}',${n})">${n}</div>`).join('')}
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Screening notes / summary</label>
+      <textarea id="edit-notes-${c.id}">${escapeHtml(c.notes)}</textarea>
+    </div>
+
+    <div class="field">
+      <label>Screening criteria answers</label>
+      <div id="edit-criteriaRows-${c.id}">${rowsHtml}</div>
+      <button type="button" class="add-row-btn" onclick="addEditCriteriaRow('${c.id}')">+ Add criterion</button>
+    </div>
+
+    <div class="field">
+      <label>CV link (optional)</label>
+      <input type="text" id="edit-cvlink-${c.id}" value="${escapeHtml(c.cvLink || '')}">
+    </div>
+
+    <div id="edit-msg-${c.id}"></div>
+    <div class="form-actions">
+      <button class="ghost-btn" onclick="toggleEdit('${c.id}')">Cancel</button>
+      <button class="primary-btn" id="edit-submit-${c.id}" onclick="submitEdit('${c.id}')">Save changes</button>
+    </div>
+  </div>`;
+}
+
+function editCriteriaRowHtml(id, i, row){
+  return `<div class="criteria-row" id="edit-crit-${id}-${i}">
+    <input type="text" class="edit-crit-q" value="${escapeHtml(row.q || '')}" placeholder="Criterion, e.g. Excel proficiency">
+    <select class="edit-crit-v">
+      <option value="Meets"${row.verdict === 'Meets' ? ' selected' : ''}>Meets</option>
+      <option value="Partial"${row.verdict === 'Partial' ? ' selected' : ''}>Partial</option>
+      <option value="No"${row.verdict === 'No' ? ' selected' : ''}>Doesn't meet</option>
+    </select>
+    <button type="button" class="row-remove" onclick="document.getElementById('edit-crit-${id}-${i}').remove()">×</button>
+  </div>`;
+}
+
+function addEditCriteriaRow(id){
+  const n = editCriteriaCount[id] || 0;
+  editCriteriaCount[id] = n + 1;
+  const wrap = document.getElementById('edit-criteriaRows-' + id);
+  const holder = document.createElement('div');
+  holder.innerHTML = editCriteriaRowHtml(id, n, {q:'', verdict:'Meets'});
+  wrap.appendChild(holder.firstElementChild);
+}
+
+function setEditScore(id, n){
+  editScores[id] = n;
+  const picker = document.getElementById('edit-scorePicker-' + id);
+  if(picker){
+    picker.querySelectorAll('.score-dot').forEach(d => {
+      d.classList.toggle('active', parseInt(d.dataset.n) <= n);
+    });
+  }
+}
+
+async function submitEdit(id){
+  const name = document.getElementById('edit-name-' + id).value.trim();
+  const role = document.getElementById('edit-role-' + id).value.trim();
+  const notes = document.getElementById('edit-notes-' + id).value.trim();
+  const cvLink = document.getElementById('edit-cvlink-' + id).value.trim();
+  const msgEl = document.getElementById('edit-msg-' + id);
+  const btn = document.getElementById('edit-submit-' + id);
+
+  if(!name || !role){
+    msgEl.innerHTML = '<div class="form-msg error">Name and role are required.</div>';
+    return;
+  }
+
+  const criteria = [];
+  document.querySelectorAll(`#edit-criteriaRows-${id} .criteria-row`).forEach(row => {
+    const q = row.querySelector('.edit-crit-q').value.trim();
+    const v = row.querySelector('.edit-crit-v').value;
+    if(q) criteria.push({q, verdict: v});
+  });
+
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name, role, notes,
+        score: editScores[id] || null,
+        criteria,
+        cvLink: cvLink || null
+      })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    toggleEdit(id);
+    loadCandidates(true);
+  }catch(e){
+    msgEl.innerHTML = '<div class="form-msg error">Could not save changes. Try again.</div>';
+    btn.disabled = false; btn.textContent = 'Save changes';
+  }
+}
+
+/* ============ Reviewer notes (CEO) ============ */
+async function saveReviewNotes(id){
+  const el = document.getElementById('rev-notes-' + id);
+  const reviewNotes = el ? el.value.trim() : '';
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reviewNotes })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Note saved');
+  }catch(e){
+    showToast('Could not save note — try again');
+  }
 }
 
 /* ============ Add candidate (HR) ============ */
