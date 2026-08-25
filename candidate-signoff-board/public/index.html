@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Candidate Sign-Off Board</title>
+<style>
+  :root{
+    --bg:#F5F6F4;
+    --surface:#FFFFFF;
+    --surface-2:#EFF1EE;
+    --ink:#1C2321;
+    --muted:#6B7570;
+    --faint:#9AA19C;
+    --brand:#2B4C5C;
+    --brand-light:#3E6779;
+    --approve:#3A7D5C;
+    --approve-bg:#E8F3EC;
+    --reject:#B0503A;
+    --reject-bg:#FBEBE6;
+    --pending:#C48A2E;
+    --pending-bg:#FBF3E3;
+    --line:#DEE1DD;
+    --line-strong:#C7CBC6;
+    --radius:10px;
+    --shadow: 0 1px 2px rgba(28,35,33,0.06), 0 4px 14px rgba(28,35,33,0.05);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .display{ font-family:'Space Grotesk',sans-serif; }
+  .mono{ font-family:'IBM Plex Mono',monospace; letter-spacing:0.01em; }
+
+  button{ font-family:inherit; cursor:pointer; }
+  input,textarea,select{ font-family:inherit; }
+
+  /* ---------- Shell ---------- */
+  #app{ max-width: 920px; margin: 0 auto; padding: 0 16px 80px; }
+
+  header.topbar{
+    position:sticky; top:0; z-index:20;
+    background:var(--bg);
+    padding:18px 0 12px;
+    border-bottom:1px solid var(--line);
+    margin-bottom:20px;
+    display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  }
+  .brand-block h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:20px; font-weight:700; margin:0 0 2px;
+    letter-spacing:-0.01em;
+  }
+  .brand-block .sub{ font-size:12.5px; color:var(--muted); }
+  .role-tag{
+    font-size:11px; text-transform:uppercase; letter-spacing:0.08em;
+    padding:4px 9px; border-radius:20px; font-weight:600;
+    background:var(--brand); color:#fff;
+  }
+  .topbar-right{ display:flex; align-items:center; gap:10px; }
+  .icon-btn{
+    background:transparent; border:1px solid var(--line-strong); color:var(--muted);
+    border-radius:8px; padding:6px 10px; font-size:12.5px; font-weight:600;
+    display:flex; align-items:center; gap:6px;
+  }
+  .icon-btn:hover{ border-color:var(--brand); color:var(--brand); }
+  .icon-btn:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible{
+    outline:2px solid var(--brand); outline-offset:2px;
+  }
+
+  /* ---------- Role picker overlay ---------- */
+  #rolePicker{
+    position:fixed; inset:0; background:var(--bg); z-index:100;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .picker-card{ max-width:460px; width:100%; text-align:center; }
+  .stamp-mark{
+    width:64px; height:64px; margin:0 auto 20px; border-radius:50%;
+    border:2.5px dashed var(--brand); display:flex; align-items:center; justify-content:center;
+    color:var(--brand); transform:rotate(-6deg);
+  }
+  .picker-card h2{ font-family:'Space Grotesk',sans-serif; font-size:24px; margin:0 0 8px; }
+  .picker-card p{ color:var(--muted); font-size:14px; margin:0 0 28px; line-height:1.5; }
+  .picker-options{ display:flex; flex-direction:column; gap:12px; }
+  .picker-btn{
+    background:var(--surface); border:1.5px solid var(--line); border-radius:var(--radius);
+    padding:18px 20px; text-align:left; display:flex; align-items:center; gap:14px;
+    box-shadow:var(--shadow); transition:border-color .15s, transform .1s;
+  }
+  .picker-btn:hover{ border-color:var(--brand); transform:translateY(-1px); }
+  .picker-btn .pb-icon{
+    width:38px; height:38px; border-radius:8px; flex:none;
+    display:flex; align-items:center; justify-content:center; font-size:18px;
+    background:var(--surface-2);
+  }
+  .picker-btn strong{ display:block; font-size:15px; margin-bottom:2px; }
+  .picker-btn span{ font-size:12.5px; color:var(--muted); }
+
+  /* ---------- Sections ---------- */
+  .section-head{
+    display:flex; align-items:baseline; justify-content:space-between; margin:28px 0 12px;
+  }
+  .section-head h3{ font-family:'Space Grotesk',sans-serif; font-size:15px; margin:0; }
+  .section-head .count{ font-size:12px; color:var(--muted); }
+  .section-head.decided h3{ color:var(--pending); }
+
+  /* ---------- Add candidate form ---------- */
+  .panel{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px; box-shadow:var(--shadow); margin-bottom:8px;
+  }
+  .panel h2{ font-family:'Space Grotesk',sans-serif; font-size:16px; margin:0 0 16px; }
+  .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+  @media(max-width:560px){ .field-row{ grid-template-columns:1fr; } }
+  label{ display:block; font-size:12px; font-weight:600; color:var(--muted); margin-bottom:5px; text-transform:uppercase; letter-spacing:0.03em; }
+  input[type=text], input[type=file], textarea, select{
+    width:100%; border:1px solid var(--line-strong); border-radius:8px; padding:9px 11px;
+    font-size:14px; background:#fff; color:var(--ink);
+  }
+  textarea{ resize:vertical; min-height:64px; }
+  .field{ margin-bottom:12px; }
+  .hint{ font-size:11.5px; color:var(--faint); margin-top:4px; }
+
+  .score-picker{ display:flex; gap:6px; }
+  .score-dot{
+    width:34px; height:34px; border-radius:8px; border:1.5px solid var(--line-strong);
+    display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700;
+    color:var(--muted); background:#fff;
+  }
+  .score-dot.active{ background:var(--brand); border-color:var(--brand); color:#fff; }
+
+  .criteria-row{ display:grid; grid-template-columns:1fr 140px 30px; gap:8px; margin-bottom:8px; align-items:center; }
+  @media(max-width:560px){ .criteria-row{ grid-template-columns:1fr 1fr auto; } }
+  .row-remove{ background:none; border:none; color:var(--faint); font-size:18px; line-height:1; padding:4px; }
+  .row-remove:hover{ color:var(--reject); }
+  .add-row-btn{
+    background:none; border:1px dashed var(--line-strong); border-radius:8px; padding:8px 12px;
+    font-size:12.5px; font-weight:600; color:var(--muted); width:100%; margin-top:2px;
+  }
+  .add-row-btn:hover{ border-color:var(--brand); color:var(--brand); }
+
+  .primary-btn{
+    background:var(--brand); color:#fff; border:none; border-radius:8px;
+    padding:11px 20px; font-size:13.5px; font-weight:700; letter-spacing:0.01em;
+  }
+  .primary-btn:hover{ background:var(--brand-light); }
+  .primary-btn:disabled{ opacity:0.5; cursor:not-allowed; }
+  .ghost-btn{
+    background:none; border:1px solid var(--line-strong); border-radius:8px;
+    padding:10px 16px; font-size:13px; font-weight:600; color:var(--ink);
+  }
+  .ghost-btn:hover{ border-color:var(--ink); }
+
+  .form-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
+  .form-msg{ font-size:12.5px; margin-top:10px; padding:8px 10px; border-radius:6px; }
+  .form-msg.error{ background:var(--reject-bg); color:var(--reject); }
+  .form-msg.ok{ background:var(--approve-bg); color:var(--approve); }
+
+  /* ---------- Role group ---------- */
+  .role-group{ margin-bottom:24px; }
+  .role-group-title{
+    display:flex; align-items:center; gap:8px; margin-bottom:10px;
+  }
+  .role-group-title .rg-name{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14.5px; color:var(--brand); }
+  .role-group-title .rg-line{ flex:1; height:1px; background:var(--line); }
+  .role-group-title .rg-count{ font-size:11.5px; color:var(--muted); }
+
+  /* ---------- Candidate card ---------- */
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:16px 18px; margin-bottom:12px; box-shadow:var(--shadow); position:relative; overflow:hidden;
+  }
+  .card.status-pending{ border-left:3px solid var(--pending); }
+  .card.status-approved{ border-left:3px solid var(--approve); }
+  .card.status-rejected{ border-left:3px solid var(--reject); }
+
+  .card-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px; }
+  .card-name{ font-size:16px; font-weight:700; }
+  .card-meta{ font-size:11.5px; color:var(--faint); margin-top:2px; }
+  .score-badge{
+    font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:12.5px;
+    background:var(--surface-2); padding:4px 9px; border-radius:6px; flex:none; white-space:nowrap;
+  }
+
+  .card-notes{ font-size:13.5px; color:var(--ink); line-height:1.5; margin:8px 0; white-space:pre-wrap; }
+
+  .criteria-list{ margin:10px 0; }
+  .criteria-item{
+    display:flex; justify-content:space-between; gap:10px; align-items:center;
+    padding:6px 0; border-bottom:1px solid var(--surface-2); font-size:13px;
+  }
+  .criteria-item:last-child{ border-bottom:none; }
+  .verdict-tag{
+    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;
+    padding:2px 8px; border-radius:20px; flex:none;
+  }
+  .verdict-meets{ background:var(--approve-bg); color:var(--approve); }
+  .verdict-partial{ background:var(--pending-bg); color:var(--pending); }
+  .verdict-no{ background:var(--reject-bg); color:var(--reject); }
+
+  .card-bottom{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  .cv-btn{
+    display:inline-flex; align-items:center; gap:6px; background:var(--surface-2); border:none;
+    border-radius:7px; padding:7px 12px; font-size:12.5px; font-weight:600; color:var(--ink);
+  }
+  .cv-btn:hover{ background:var(--line); }
+  .cv-link-text{ font-size:12px; color:var(--brand-light); word-break:break-all; }
+
+  .decision-actions{ display:flex; gap:8px; }
+  .approve-btn, .reject-btn{
+    border:none; border-radius:7px; padding:8px 16px; font-size:12.5px; font-weight:700; color:#fff;
+  }
+  .approve-btn{ background:var(--approve); }
+  .approve-btn:hover{ background:#2E6349; }
+  .reject-btn{ background:var(--reject); }
+  .reject-btn:hover{ background:#93412F; }
+
+  .reject-note{
+    width:100%; margin-top:8px; display:none;
+  }
+  .reject-note.show{ display:block; }
+  .reject-note textarea{ min-height:44px; }
+  .reject-note .mini-actions{ display:flex; gap:8px; margin-top:6px; }
+  .mini-confirm{ background:var(--reject); color:#fff; border:none; border-radius:6px; padding:6px 12px; font-size:12px; font-weight:700; }
+  .mini-cancel{ background:none; border:1px solid var(--line-strong); border-radius:6px; padding:6px 12px; font-size:12px; }
+
+  /* decided stamp */
+  .decision-stamp{
+    position:absolute; top:14px; right:16px;
+    font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:11px;
+    letter-spacing:0.08em; text-transform:uppercase;
+    border:2px solid; border-radius:6px; padding:4px 10px;
+    transform:rotate(4deg);
+  }
+  .decision-stamp.approved{ color:var(--approve); border-color:var(--approve); }
+  .decision-stamp.rejected{ color:var(--reject); border-color:var(--reject); }
+  .decision-comment{
+    font-size:12.5px; color:var(--muted); background:var(--surface-2); border-radius:7px;
+    padding:8px 10px; margin-top:8px; font-style:italic;
+  }
+  .handled-btn{
+    background:none; border:1px solid var(--line-strong); border-radius:7px; padding:7px 13px;
+    font-size:12px; font-weight:600; color:var(--muted);
+  }
+  .handled-btn:hover{ border-color:var(--brand); color:var(--brand); }
+
+  /* ---------- Empty state ---------- */
+  .empty-state{
+    text-align:center; padding:44px 20px; color:var(--faint);
+  }
+  .empty-state .es-mark{ font-size:28px; margin-bottom:10px; }
+  .empty-state p{ font-size:13.5px; margin:0; }
+
+  .loading-row{ text-align:center; padding:30px; color:var(--faint); font-size:13px; }
+
+  .toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    background:var(--ink); color:#fff; padding:10px 18px; border-radius:8px;
+    font-size:13px; z-index:200; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s;
+    box-shadow:0 6px 18px rgba(0,0,0,0.2);
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(-6px); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition:none !important; animation:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div id="rolePicker">
+  <div class="picker-card">
+    <div class="stamp-mark">✓</div>
+    <h2>Candidate Sign-Off Board</h2>
+    <p>Who's viewing this board on this device? You can switch anytime from the top bar.</p>
+    <div class="picker-options">
+      <button class="picker-btn" onclick="setRole('hr')">
+        <div class="pb-icon">📋</div>
+        <div><strong>I'm screening candidates</strong><span>Add candidates, attach CVs, track decisions</span></div>
+      </button>
+      <button class="picker-btn" onclick="setRole('ceo')">
+        <div class="pb-icon">✓</div>
+        <div><strong>I'm reviewing candidates</strong><span>See who's waiting and approve or reject</span></div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="app" style="display:none;">
+  <header class="topbar">
+    <div class="brand-block">
+      <h1>Candidate Sign-Off Board</h1>
+      <div class="sub" id="headerSub">Loading…</div>
+    </div>
+    <div class="topbar-right">
+      <span class="role-tag" id="roleTag">—</span>
+      <button class="icon-btn" onclick="manualRefresh()">↻ Refresh</button>
+      <button class="icon-btn" onclick="openPicker()">Switch view</button>
+    </div>
+  </header>
+
+  <div id="hrAddPanel"></div>
+  <div id="boardRoot"><div class="loading-row">Loading candidates…</div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ State ============ */
+let currentRole = null;          // 'hr' | 'ceo'
+let candidates = [];             // array of meta objects
+let pollTimer = null;
+let criteriaRowCount = 0;
+let currentScore = 0;
+
+/* ============ Utilities ============ */
+function escapeHtml(str){
+  if(str===undefined || str===null) return '';
+  return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function daysAgo(iso){
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if(d <= 0) return 'today';
+  if(d === 1) return '1 day waiting';
+  return d + ' days waiting';
+}
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2400);
+}
+
+/* ============ Role handling ============ */
+function loadRole(){
+  const stored = localStorage.getItem('csb-ui-role');
+  if(stored === 'hr' || stored === 'ceo'){
+    currentRole = stored;
+    enterApp();
+    return;
+  }
+  openPicker();
+}
+function openPicker(){
+  document.getElementById('rolePicker').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
+function setRole(role){
+  currentRole = role;
+  try{ localStorage.setItem('csb-ui-role', role); }catch(e){ /* ignore, still proceed */ }
+  enterApp();
+}
+function enterApp(){
+  document.getElementById('rolePicker').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('roleTag').textContent = currentRole === 'hr' ? 'Screening' : 'Reviewing';
+  document.getElementById('headerSub').textContent = currentRole === 'hr'
+    ? 'Add screened candidates and track sign-off status'
+    : 'Review and decide on candidates waiting for you';
+  if(currentRole === 'hr'){ renderAddPanel(); } else { document.getElementById('hrAddPanel').innerHTML = ''; }
+  loadCandidates();
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(loadCandidates, 20000);
+}
+function manualRefresh(){ loadCandidates(true); }
+
+/* ============ Loading candidates ============ */
+async function loadCandidates(isManual){
+  try{
+    const res = await fetch('/candidates');
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    const data = await res.json();
+    data.sort((a,b) => new Date(a.dateAdded) - new Date(b.dateAdded));
+    candidates = data;
+    renderBoard();
+    if(isManual) showToast('Board updated');
+  }catch(e){
+    document.getElementById('boardRoot').innerHTML =
+      '<div class="empty-state"><div class="es-mark">⚠</div><p>Could not load the board right now. Try refresh.</p></div>';
+  }
+}
+
+/* ============ Rendering ============ */
+function renderBoard(){
+  const root = document.getElementById('boardRoot');
+  const pending = candidates.filter(c => c.status === 'pending');
+  const decided = candidates.filter(c => c.status !== 'pending');
+
+  let html = '';
+
+  html += `<div class="section-head"><h3>Waiting for sign-off</h3><span class="count">${pending.length} pending</span></div>`;
+  html += renderGrouped(pending, currentRole === 'ceo');
+
+  if(currentRole === 'hr' && decided.length){
+    html += `<div class="section-head decided"><h3>Decided — needs your action</h3><span class="count">${decided.length}</span></div>`;
+    html += renderGrouped(decided, false);
+  }
+
+  root.innerHTML = html;
+}
+
+function renderGrouped(list, ceoActions){
+  if(!list.length){
+    return `<div class="empty-state"><div class="es-mark">${ceoActions ? '✓' : '—'}</div><p>${ceoActions ? "Nothing waiting on you right now." : "No candidates here yet."}</p></div>`;
+  }
+  const groups = {};
+  list.forEach(c => {
+    const role = c.role || 'Unspecified role';
+    if(!groups[role]) groups[role] = [];
+    groups[role].push(c);
+  });
+  let out = '';
+  Object.keys(groups).sort().forEach(role => {
+    out += `<div class="role-group">
+      <div class="role-group-title">
+        <span class="rg-name">${escapeHtml(role)}</span>
+        <span class="rg-line"></span>
+        <span class="rg-count">${groups[role].length}</span>
+      </div>
+      ${groups[role].map(c => renderCard(c, ceoActions)).join('')}
+    </div>`;
+  });
+  return out;
+}
+
+function renderCard(c, ceoActions){
+  const criteriaHtml = (c.criteria || []).map(row => {
+    const cls = row.verdict === 'Meets' ? 'verdict-meets' : (row.verdict === 'Partial' ? 'verdict-partial' : 'verdict-no');
+    return `<div class="criteria-item"><span>${escapeHtml(row.q)}</span><span class="verdict-tag ${cls}">${escapeHtml(row.verdict||'—')}</span></div>`;
+  }).join('');
+
+  const cvBtn = c.hasCv
+    ? `<button class="cv-btn" onclick="viewCv('${c.id}')">📄 View CV${c.cvFileName ? ' — ' + escapeHtml(c.cvFileName) : ''}</button>`
+    : (c.cvLink ? `<a class="cv-link-text" href="${escapeHtml(c.cvLink)}" target="_blank" rel="noopener">🔗 ${escapeHtml(c.cvLink)}</a>` : '<span class="hint">No CV attached</span>');
+
+  let bottom = `<div class="card-bottom">${cvBtn}`;
+  if(ceoActions){
+    bottom += `<div class="decision-actions">
+      <button class="approve-btn" onclick="decide('${c.id}','approved')">Approve</button>
+      <button class="reject-btn" onclick="toggleRejectNote('${c.id}')">Reject</button>
+    </div>`;
+  }
+  if(currentRole === 'hr' && c.status !== 'pending'){
+    bottom += `<button class="handled-btn" onclick="markHandled('${c.id}')">Mark handled — remove</button>`;
+  }
+  bottom += `</div>`;
+
+  let rejectNoteBlock = '';
+  if(ceoActions){
+    rejectNoteBlock = `<div class="reject-note" id="rn-${c.id}">
+      <textarea id="rn-text-${c.id}" placeholder="Optional reason (helps HR)"></textarea>
+      <div class="mini-actions">
+        <button class="mini-confirm" onclick="decide('${c.id}','rejected')">Confirm reject</button>
+        <button class="mini-cancel" onclick="toggleRejectNote('${c.id}')">Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  let stamp = '';
+  let decisionComment = '';
+  if(c.status === 'approved'){
+    stamp = `<div class="decision-stamp approved">Approved</div>`;
+  }else if(c.status === 'rejected'){
+    stamp = `<div class="decision-stamp rejected">Rejected</div>`;
+    if(c.decision && c.decision.comment){
+      decisionComment = `<div class="decision-comment">"${escapeHtml(c.decision.comment)}"</div>`;
+    }
+  }
+
+  return `<div class="card status-${c.status}">
+    ${stamp}
+    <div class="card-top">
+      <div>
+        <div class="card-name">${escapeHtml(c.name)}</div>
+        <div class="card-meta">${daysAgo(c.dateAdded)}${c.status !== 'pending' ? ' · decided ' + (c.decision && c.decision.decidedAt ? new Date(c.decision.decidedAt).toLocaleDateString() : '') : ''}</div>
+      </div>
+      ${c.score ? `<div class="score-badge">${c.score}/5</div>` : ''}
+    </div>
+    ${c.notes ? `<div class="card-notes">${escapeHtml(c.notes)}</div>` : ''}
+    ${criteriaHtml ? `<div class="criteria-list">${criteriaHtml}</div>` : ''}
+    ${decisionComment}
+    ${bottom}
+    ${rejectNoteBlock}
+  </div>`;
+}
+
+function toggleRejectNote(id){
+  const el = document.getElementById('rn-' + id);
+  if(el) el.classList.toggle('show');
+}
+
+/* ============ Add candidate (HR) ============ */
+function renderAddPanel(){
+  const roleOptions = [...new Set(candidates.map(c => c.role).filter(Boolean))];
+  document.getElementById('hrAddPanel').innerHTML = `
+    <div class="panel">
+      <h2>Add a screened candidate</h2>
+      <div class="field-row">
+        <div class="field">
+          <label for="f-name">Candidate name</label>
+          <input type="text" id="f-name" placeholder="e.g. Ahmed Samir">
+        </div>
+        <div class="field">
+          <label for="f-role">Role</label>
+          <input type="text" id="f-role" list="roleList" placeholder="e.g. Junior Accountant">
+          <datalist id="roleList">${roleOptions.map(r => `<option value="${escapeHtml(r)}">`).join('')}</datalist>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Screening score</label>
+        <div class="score-picker" id="scorePicker">
+          ${[1,2,3,4,5].map(n => `<div class="score-dot" data-n="${n}" onclick="setScore(${n})">${n}</div>`).join('')}
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="f-notes">Screening notes / summary</label>
+        <textarea id="f-notes" placeholder="Key impressions, fit, concerns..."></textarea>
+      </div>
+
+      <div class="field">
+        <label>Screening criteria answers</label>
+        <div id="criteriaRows"></div>
+        <button type="button" class="add-row-btn" onclick="addCriteriaRow()">+ Add criterion</button>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="f-cv">CV file (optional)</label>
+          <input type="file" id="f-cv" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg">
+          <div class="hint">Under ~3.5MB. For bigger files, use the link field instead.</div>
+        </div>
+        <div class="field">
+          <label for="f-cvlink">Or CV link (optional)</label>
+          <input type="text" id="f-cvlink" placeholder="Drive / Wuzzuf / etc. link">
+        </div>
+      </div>
+
+      <div id="formMsg"></div>
+      <div class="form-actions">
+        <button class="ghost-btn" onclick="resetForm()">Clear</button>
+        <button class="primary-btn" id="submitBtn" onclick="submitCandidate()">Add to board</button>
+      </div>
+    </div>
+  `;
+  criteriaRowCount = 0;
+  currentScore = 0;
+  addCriteriaRow();
+}
+
+function setScore(n){
+  currentScore = n;
+  document.querySelectorAll('.score-dot').forEach(d => {
+    d.classList.toggle('active', parseInt(d.dataset.n) <= n);
+  });
+}
+
+function addCriteriaRow(){
+  criteriaRowCount++;
+  const id = 'crit-' + criteriaRowCount;
+  const wrap = document.getElementById('criteriaRows');
+  const row = document.createElement('div');
+  row.className = 'criteria-row';
+  row.id = id;
+  row.innerHTML = `
+    <input type="text" placeholder="Criterion, e.g. Excel proficiency" class="crit-q">
+    <select class="crit-v">
+      <option value="Meets">Meets</option>
+      <option value="Partial">Partial</option>
+      <option value="No">Doesn't meet</option>
+    </select>
+    <button type="button" class="row-remove" onclick="document.getElementById('${id}').remove()">×</button>
+  `;
+  wrap.appendChild(row);
+}
+
+function resetForm(){ renderAddPanel(); }
+
+async function submitCandidate(){
+  const name = document.getElementById('f-name').value.trim();
+  const role = document.getElementById('f-role').value.trim();
+  const notes = document.getElementById('f-notes').value.trim();
+  const cvLink = document.getElementById('f-cvlink').value.trim();
+  const fileInput = document.getElementById('f-cv');
+  const msgEl = document.getElementById('formMsg');
+  const btn = document.getElementById('submitBtn');
+
+  if(!name || !role){
+    msgEl.innerHTML = '<div class="form-msg error">Name and role are required.</div>';
+    return;
+  }
+  const file = fileInput.files[0];
+  if(file && file.size > 3.6 * 1024 * 1024){
+    msgEl.innerHTML = '<div class="form-msg error">That file is too large to store here — use the CV link field instead.</div>';
+    return;
+  }
+
+  const criteria = [];
+  document.querySelectorAll('.criteria-row').forEach(row => {
+    const q = row.querySelector('.crit-q').value.trim();
+    const v = row.querySelector('.crit-v').value;
+    if(q) criteria.push({q, verdict: v});
+  });
+
+  btn.disabled = true; btn.textContent = 'Adding…';
+
+  try{
+    let cvBase64 = null;
+    if(file){
+      cvBase64 = await fileToBase64(file);
+    }
+    const payload = {
+      name, role,
+      notes, score: currentScore || null,
+      criteria,
+      cvFileName: file ? file.name : null,
+      cvBase64,
+      cvLink: cvLink || null
+    };
+
+    const res = await fetch('/candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+
+    msgEl.innerHTML = '<div class="form-msg ok">Added — visible on the board now.</div>';
+    setTimeout(() => { resetForm(); }, 700);
+    loadCandidates();
+  }catch(e){
+    msgEl.innerHTML = '<div class="form-msg error">Could not save this candidate. Check connection and try again.</div>';
+  }
+  btn.disabled = false; btn.textContent = 'Add to board';
+}
+
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('File read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ============ CV viewing ============ */
+async function viewCv(id){
+  try{
+    const res = await fetch('/candidates/' + id + '/cv');
+    if(!res.ok){ showToast('CV not found'); return; }
+    const data = await res.json();
+    if(!data || !data.cvBase64){ showToast('CV not found'); return; }
+    const link = document.createElement('a');
+    link.href = data.cvBase64;
+    link.download = data.cvFileName || 'cv';
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }catch(e){
+    showToast('Could not open the CV');
+  }
+}
+
+/* ============ Decisions ============ */
+async function decide(id, status){
+  let comment = '';
+  if(status === 'rejected'){
+    const el = document.getElementById('rn-text-' + id);
+    comment = el ? el.value.trim() : '';
+  }
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, decisionComment: comment })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast(status === 'approved' ? 'Approved' : 'Rejected');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not save decision — try again');
+  }
+}
+
+async function markHandled(id){
+  try{
+    const res = await fetch('/candidates/' + id, { method: 'DELETE' });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    loadCandidates();
+  }catch(e){
+    showToast('Could not remove this entry');
+  }
+}
+
+/* ============ Init ============ */
+window.addEventListener('DOMContentLoaded', loadRole);
+window.addEventListener('focus', () => { if(currentRole) loadCandidates(); });
+</script>
+</body>
+</html>
