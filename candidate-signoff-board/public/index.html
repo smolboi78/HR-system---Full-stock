@@ -111,6 +111,21 @@
   .section-head .count{ font-size:12px; color:var(--muted); }
   .section-head.decided h3{ color:var(--pending); }
 
+  /* ---------- Reviewing view tabs ---------- */
+  .ceo-tabs{ display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
+  .ceo-tab-btn{
+    background:var(--surface); border:1px solid var(--line-strong); border-radius:20px;
+    padding:7px 14px; font-size:12.5px; font-weight:600; color:var(--muted);
+    display:inline-flex; align-items:center; gap:7px;
+  }
+  .ceo-tab-btn:hover{ border-color:var(--brand); color:var(--brand); }
+  .ceo-tab-btn.active{ background:var(--brand); border-color:var(--brand); color:#fff; }
+  .ceo-tab-btn .tab-count{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600;
+    background:var(--surface-2); color:var(--muted); padding:1px 7px; border-radius:10px;
+  }
+  .ceo-tab-btn.active .tab-count{ background:rgba(255,255,255,0.25); color:#fff; }
+
   /* ---------- Add candidate form ---------- */
   .panel{
     background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
@@ -332,6 +347,7 @@ let currentScore = 0;
 let editingId = null;            // candidate id currently open in the edit form, or null
 const editScores = {};           // per-candidate score while editing
 const editCriteriaCount = {};    // per-candidate criteria row counter while editing
+let activeCeoTab = 'pending';    // 'pending' | 'hold' | 'rejected' | 'approved' — reviewing view tab
 
 /* ============ Utilities ============ */
 function escapeHtml(str){
@@ -403,15 +419,21 @@ async function loadCandidates(isManual){
 /* ============ Rendering ============ */
 function renderBoard(){
   const root = document.getElementById('boardRoot');
+
+  if(currentRole === 'ceo'){
+    root.innerHTML = renderCeoTabs();
+    return;
+  }
+
   const pending = candidates.filter(c => c.status === 'pending');
   const decided = candidates.filter(c => c.status !== 'pending');
 
   let html = '';
 
   html += `<div class="section-head"><h3>Waiting for sign-off</h3><span class="count">${pending.length} pending</span></div>`;
-  html += renderGrouped(pending, currentRole === 'ceo');
+  html += renderGrouped(pending, false);
 
-  if(currentRole === 'hr' && decided.length){
+  if(decided.length){
     html += `<div class="section-head decided"><h3>Decided — needs your action</h3><span class="count">${decided.length}</span></div>`;
     html += renderGrouped(decided, false);
   }
@@ -419,9 +441,33 @@ function renderBoard(){
   root.innerHTML = html;
 }
 
-function renderGrouped(list, ceoActions){
+function renderCeoTabs(){
+  const tabs = [
+    { key:'pending', label:'Pending', list: candidates.filter(c => c.status === 'pending' && !c.onHold), ceoActions:true, emptyMessage:'Nothing waiting on you right now.' },
+    { key:'hold', label:'On Hold', list: candidates.filter(c => c.status === 'pending' && c.onHold), ceoActions:true, emptyMessage:'No candidates on hold.' },
+    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected'), ceoActions:false, emptyMessage:'No rejected candidates yet.' },
+    { key:'approved', label:'Approved', list: candidates.filter(c => c.status === 'approved'), ceoActions:false, emptyMessage:'No approved candidates yet.' },
+  ];
+
+  let tabBar = `<div class="ceo-tabs">`;
+  tabs.forEach(t => {
+    tabBar += `<button class="ceo-tab-btn${activeCeoTab === t.key ? ' active' : ''}" onclick="setCeoTab('${t.key}')">${t.label}<span class="tab-count">${t.list.length}</span></button>`;
+  });
+  tabBar += `</div>`;
+
+  const active = tabs.find(t => t.key === activeCeoTab) || tabs[0];
+  return tabBar + renderGrouped(active.list, active.ceoActions, active.emptyMessage);
+}
+
+function setCeoTab(key){
+  activeCeoTab = key;
+  renderBoard();
+}
+
+function renderGrouped(list, ceoActions, emptyMessage){
   if(!list.length){
-    return `<div class="empty-state"><div class="es-mark">${ceoActions ? '✓' : '—'}</div><p>${ceoActions ? "Nothing waiting on you right now." : "No candidates here yet."}</p></div>`;
+    const msg = emptyMessage || (ceoActions ? "Nothing waiting on you right now." : "No candidates here yet.");
+    return `<div class="empty-state"><div class="es-mark">${ceoActions ? '✓' : '—'}</div><p>${msg}</p></div>`;
   }
   const groups = {};
   list.forEach(c => {
