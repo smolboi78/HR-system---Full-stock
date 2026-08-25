@@ -897,7 +897,7 @@ async function markHandled(id){
 
 /* ============ Init ============ */
 window.addEventListener('DOMContentLoaded', loadRole);
-window.addEventListener('focus', () => { if(currentRole) loadCandidates(); });
+window.addEventListener('focus', () => { if(currentRole && !editingId) loadCandidates(); });
 </script>
 </body>
 </html>
