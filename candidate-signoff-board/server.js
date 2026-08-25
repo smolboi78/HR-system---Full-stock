@@ -1,15 +1,15 @@
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const express = require('express');
-const Database = require('better-sqlite3');
-const { v4: uuidv4 } = require('uuid');
+const { DatabaseSync } = require('node:sqlite');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'candidates.db');
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
+const db = new DatabaseSync(DB_PATH);
+db.exec('PRAGMA journal_mode = WAL;');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS candidates (
@@ -28,6 +28,20 @@ db.exec(`
     decisionComment TEXT
   );
 `);
+
+const stmts = {
+  list: db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC'),
+  getById: db.prepare('SELECT * FROM candidates WHERE id = ?'),
+  getCv: db.prepare('SELECT cvFileName, cvBase64 FROM candidates WHERE id = ?'),
+  insert: db.prepare(`
+    INSERT INTO candidates
+      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment)
+    VALUES
+      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment)
+  `),
+  updateStatus: db.prepare('UPDATE candidates SET status = ?, decidedAt = ?, decisionComment = ? WHERE id = ?'),
+  remove: db.prepare('DELETE FROM candidates WHERE id = ?'),
+};
 
 const STATUSES = ['pending', 'approved', 'rejected'];
 
@@ -61,12 +75,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.get('/candidates', (req, res) => {
-  const rows = db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC').all();
+  const rows = stmts.list.all();
   res.json(rows.map((row) => rowToCandidate(row)));
 });
 
 app.get('/candidates/:id/cv', (req, res) => {
-  const row = db.prepare('SELECT cvFileName, cvBase64 FROM candidates WHERE id = ?').get(req.params.id);
+  const row = stmts.getCv.get(req.params.id);
   if (!row || !row.cvBase64) {
     return res.status(404).json({ error: 'CV not found' });
   }
@@ -80,13 +94,11 @@ app.post('/candidates', (req, res) => {
     return res.status(400).json({ error: 'Name and role are required.' });
   }
 
-  const id = uuidv4();
-  const dateAdded = new Date().toISOString();
   const row = {
-    id,
+    id: crypto.randomUUID(),
     name: String(name).trim(),
     role: String(role).trim(),
-    dateAdded,
+    dateAdded: new Date().toISOString(),
     notes: notes ? String(notes) : null,
     score: Number.isInteger(score) ? score : null,
     criteria: JSON.stringify(Array.isArray(criteria) ? criteria : []),
@@ -98,18 +110,13 @@ app.post('/candidates', (req, res) => {
     decisionComment: null,
   };
 
-  db.prepare(`
-    INSERT INTO candidates
-      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment)
-    VALUES
-      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment)
-  `).run(row);
+  stmts.insert.run(row);
 
   res.status(201).json(rowToCandidate(row));
 });
 
 app.patch('/candidates/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM candidates WHERE id = ?').get(req.params.id);
+  const existing = stmts.getById.get(req.params.id);
   if (!existing) {
     return res.status(404).json({ error: 'Candidate not found' });
   }
@@ -122,16 +129,14 @@ app.patch('/candidates/:id', (req, res) => {
   const decidedAt = status === 'pending' ? null : new Date().toISOString();
   const comment = status === 'pending' ? null : (decisionComment ? String(decisionComment) : '');
 
-  db.prepare(`
-    UPDATE candidates SET status = ?, decidedAt = ?, decisionComment = ? WHERE id = ?
-  `).run(status, decidedAt, comment, req.params.id);
+  stmts.updateStatus.run(status, decidedAt, comment, req.params.id);
 
-  const updated = db.prepare('SELECT * FROM candidates WHERE id = ?').get(req.params.id);
+  const updated = stmts.getById.get(req.params.id);
   res.json(rowToCandidate(updated));
 });
 
 app.delete('/candidates/:id', (req, res) => {
-  const result = db.prepare('DELETE FROM candidates WHERE id = ?').run(req.params.id);
+  const result = stmts.remove.run(req.params.id);
   if (result.changes === 0) {
     return res.status(404).json({ error: 'Candidate not found' });
   }
