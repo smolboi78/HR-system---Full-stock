@@ -1,0 +1,32 @@
+name: One-off Import Candidates
+
+on:
+  workflow_dispatch:
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: POST each candidate to the sign-off board API
+        run: |
+          set -euo pipefail
+          BASE_URL="https://hr-system-full-stock-production.up.railway.app"
+          FAILED=0
+          while IFS= read -r candidate; do
+            name=$(echo "$candidate" | jq -r '.name')
+            http_code=$(curl -s -o /tmp/resp.json -w "%{http_code}" -X POST "$BASE_URL/candidates" \
+              -H "Content-Type: application/json; charset=utf-8" \
+              -d "$candidate")
+            if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+              echo "Added: $name"
+            else
+              echo "FAILED ($http_code): $name"
+              cat /tmp/resp.json
+              FAILED=1
+            fi
+          done < <(jq -c '.[]' candidate-signoff-board/scripts/one-off-import-candidates.json)
+          if [ "$FAILED" -eq 1 ]; then
+            exit 1
+          fi
