@@ -6,11 +6,14 @@ export interface DateRange {
   to: Date; // inclusive
 }
 
+export type EmployeeCategory = "MANAGEMENT" | "SALES_COLLECTOR" | "DELIVERY_AGENT" | "OTHER";
+
 export interface EmployeeAttendanceSummary {
   employeeId: string;
   employmentNumber: string;
   displayNameEn: string;
   branchId: number;
+  category: EmployeeCategory;
   workingDays: number;
   daysPresent: number;
   daysAbsent: number;
@@ -49,13 +52,14 @@ function workingDatesInRange(range: DateRange, daysOff: number[]): Set<string> {
 
 export async function getAttendanceSummaries(
   range: DateRange,
-  opts: { employeeId?: string; branchId?: number } = {}
+  opts: { employeeId?: string; branchId?: number; category?: EmployeeCategory } = {}
 ): Promise<EmployeeAttendanceSummary[]> {
   const employees = await prisma.employee.findMany({
     where: {
       active: true,
       ...(opts.employeeId ? { id: opts.employeeId } : {}),
       ...(opts.branchId ? { zenhrBranchId: opts.branchId } : {}),
+      ...(opts.category ? { category: opts.category } : {}),
     },
   });
 
@@ -90,6 +94,7 @@ export async function getAttendanceSummaries(
       employmentNumber: emp.employmentNumber,
       displayNameEn: emp.displayNameEn,
       branchId: emp.zenhrBranchId,
+      category: emp.category,
       workingDays: workingDates.size,
       daysPresent,
       daysAbsent,

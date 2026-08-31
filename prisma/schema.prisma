@@ -14,6 +14,28 @@ enum ManagerRole {
   MANAGER
 }
 
+// ---------- Employee categorization ----------
+
+// Which performance metric applies to an employee: Management is measured
+// by hours worked, Sales/Collectors by Bricks visit count, Delivery Agents
+// are tracked in ZenHR (attendance only) in their own pending section.
+enum EmployeeCategory {
+  MANAGEMENT
+  SALES_COLLECTOR
+  DELIVERY_AGENT
+  OTHER
+}
+
+// Maps a ZenHR job role/title string (e.g. "Collector", "Delivery agent")
+// to the category that decides which dashboard section and metric an
+// employee falls into. Seeded from the real job roles seen in the
+// business's ZenHR attendance export; add a row here for any new job role
+// that shows up uncategorized.
+model JobRoleCategoryRule {
+  jobRole  String           @id
+  category EmployeeCategory
+}
+
 model ManagerUser {
   id           String      @id @default(cuid())
   email        String      @unique
@@ -63,6 +85,11 @@ model Employee {
   active           Boolean   @default(true)
   hiringDate       DateTime? @db.Date
   terminationDate  DateTime? @db.Date
+
+  // Job role/title as reported by ZenHR, and the dashboard category it maps
+  // to via JobRoleCategoryRule (OTHER until a rule matches).
+  jobRole  String?
+  category EmployeeCategory @default(OTHER)
 
   // Bricks (visits) linkage - phase 2, but schema ready now.
   // Populated either by matching displayNameEn to a Bricks owner name,

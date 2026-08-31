@@ -203,6 +203,27 @@ export interface ZenhrEmployee {
       en: { first_name: string; last_name: string; second_name?: string; third_name?: string };
     };
   };
+  // Job title/position - exact ZenHR field name is unconfirmed until we've
+  // seen a real API response (candidates seen in other ZenHR integrations:
+  // job_title, position, job_position). extractJobRole() below tries all of
+  // them; if none match once connected, log a sample employee response and
+  // add the real field name here and in extractJobRole().
+  job_title?: string;
+  position?: string | { name?: { en?: string } };
+  job_position?: { name?: { en?: string } };
+}
+
+// See job_title/position/job_position comment on ZenhrEmployee above - this
+// tries every candidate field name we know of. Update once ZenHR's actual
+// field is confirmed from a live API response.
+export function extractJobRole(emp: ZenhrEmployee): string | null {
+  if (typeof emp.job_title === "string" && emp.job_title.trim()) return emp.job_title.trim();
+  if (typeof emp.position === "string" && emp.position.trim()) return emp.position.trim();
+  if (emp.position && typeof emp.position === "object" && emp.position.name?.en) {
+    return emp.position.name.en.trim();
+  }
+  if (emp.job_position?.name?.en) return emp.job_position.name.en.trim();
+  return null;
 }
 
 export interface ZenhrAttendanceRecord {

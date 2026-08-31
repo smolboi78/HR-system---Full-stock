@@ -24,6 +24,7 @@ export interface BricksVisit {
   id: string;
   serial_num: number;
   contact_id: string;
+  contact?: { name?: string }; // present because listVisits preloads it
   status: string;
   is_planned: boolean;
   is_successful?: boolean;

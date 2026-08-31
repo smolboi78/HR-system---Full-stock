@@ -3,10 +3,12 @@ import {
   listBranches,
   listEmployees,
   listAttendanceRecords,
+  extractJobRole,
   type ZenhrEmployee,
   type ZenhrAttendanceRecord,
   type AttendanceDateRange,
 } from "./zenhr";
+import { listVisits, type BricksVisit } from "./bricks";
 
 function displayName(emp: ZenhrEmployee): { first: string; last: string; display: string } {
   const en = emp.user?.name?.en;
@@ -72,6 +74,8 @@ export async function syncEmployees(): Promise<void> {
     const overrideByEmploymentNumber = new Map(
       overrides.map((o) => [o.employmentNumber, o.bricksDisplayName])
     );
+    const categoryRules = await prisma.jobRoleCategoryRule.findMany();
+    const categoryByJobRole = new Map(categoryRules.map((r) => [r.jobRole, r.category]));
 
     let count = 0;
     for (const branch of branches) {
@@ -79,6 +83,8 @@ export async function syncEmployees(): Promise<void> {
       for (const emp of employees) {
         const { first, last, display } = displayName(emp);
         const bricksDisplayName = overrideByEmploymentNumber.get(String(emp.employment_number));
+        const jobRole = extractJobRole(emp);
+        const category = (jobRole && categoryByJobRole.get(jobRole)) || "OTHER";
 
         await prisma.employee.upsert({
           where: { zenhrEmployeeId: emp.id },
@@ -93,6 +99,8 @@ export async function syncEmployees(): Promise<void> {
             hiringDate: emp.hiring_date ? new Date(emp.hiring_date) : null,
             terminationDate: emp.termination_date ? new Date(emp.termination_date) : null,
             bricksDisplayName: bricksDisplayName ?? display,
+            jobRole,
+            category,
           },
           update: {
             zenhrBranchId: emp.branch_id,
@@ -106,6 +114,8 @@ export async function syncEmployees(): Promise<void> {
             // Don't stomp a manually-fixed bricksDisplayName with the
             // auto-derived one on every sync unless it was never set.
             ...(bricksDisplayName ? { bricksDisplayName } : {}),
+            jobRole,
+            category,
           },
         });
         count += 1;
@@ -144,6 +154,96 @@ export async function syncAttendance(range: AttendanceDateRange): Promise<void> 
       }
     }
     return count;
+  });
+}
+
+function normalizeName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export interface VisitDateRange {
+  from: string; // ISO date-time
+  to: string; // ISO date-time
+}
+
+// Matches Bricks visits to ZenHR employees and stores them. Employees with
+// no ZenHR<->Bricks link (Delivery Agents, Management) simply won't match
+// any visit - that's expected, only Sales/Collectors show up in Bricks.
+export async function syncVisits(range: VisitDateRange): Promise<void> {
+  await runSync("BRICKS", async () => {
+    const employees = await prisma.employee.findMany();
+    const byBricksUserId = new Map(
+      employees.filter((e) => e.bricksUserId).map((e) => [e.bricksUserId as string, e])
+    );
+    const byNormalizedName = new Map(
+      employees.map((e) => [normalizeName(e.bricksDisplayName || e.displayNameEn), e])
+    );
+
+    let count = 0;
+    let offset = 0;
+    const limit = 200;
+    while (true) {
+      const { visits } = await listVisits(
+        { created_from: range.from, created_to: range.to, include_planned: false },
+        { limit, offset }
+      );
+      for (const visit of visits) {
+        await upsertVisit(visit, byBricksUserId, byNormalizedName);
+        count += 1;
+      }
+      if (visits.length < limit) break;
+      offset += limit;
+    }
+    return count;
+  });
+}
+
+async function upsertVisit(
+  visit: BricksVisit,
+  byBricksUserId: Map<string, { id: string; bricksUserId?: string | null }>,
+  byNormalizedName: Map<string, { id: string; bricksUserId?: string | null }>
+) {
+  const employee =
+    byBricksUserId.get(visit.owner_id) ?? byNormalizedName.get(normalizeName(visit.owner.name));
+
+  // First time we see this owner_id via a name match, pin it on the
+  // employee so future syncs match by stable id instead of a name that
+  // could change or collide.
+  if (employee && !employee.bricksUserId) {
+    await prisma.employee.update({
+      where: { id: employee.id },
+      data: { bricksUserId: visit.owner_id },
+    });
+    employee.bricksUserId = visit.owner_id;
+  }
+
+  await prisma.visit.upsert({
+    where: { bricksVisitId: visit.id },
+    create: {
+      bricksVisitId: visit.id,
+      employeeId: employee?.id,
+      ownerBricksId: visit.owner_id,
+      ownerNameRaw: visit.owner.name,
+      contactId: visit.contact_id,
+      contactName: visit.contact?.name,
+      isSuccessful: visit.is_successful ?? null,
+      isPlanned: visit.is_planned,
+      status: visit.status,
+      visitTime: new Date(visit.visit_time),
+      durationMs: visit.duration ?? null,
+    },
+    update: {
+      employeeId: employee?.id,
+      ownerBricksId: visit.owner_id,
+      ownerNameRaw: visit.owner.name,
+      contactId: visit.contact_id,
+      contactName: visit.contact?.name,
+      isSuccessful: visit.is_successful ?? null,
+      isPlanned: visit.is_planned,
+      status: visit.status,
+      visitTime: new Date(visit.visit_time),
+      durationMs: visit.duration ?? null,
+    },
   });
 }
 

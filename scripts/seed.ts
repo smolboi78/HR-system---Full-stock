@@ -17,6 +17,32 @@ const NAME_OVERRIDES: { employmentNumber: string; bricksDisplayName: string }[] 
   { employmentNumber: "212", bricksDisplayName: "Abdullah Ibrahim Habashi" },
 ];
 
+// Job role -> dashboard category, seeded from the real job roles seen in
+// the business's ZenHR attendance export (Management & Warehouse block vs.
+// Sales, collectors & Logistics block). Add a row here whenever a new job
+// role shows up as OTHER on the dashboard.
+const JOB_ROLE_CATEGORIES: { jobRole: string; category: "MANAGEMENT" | "SALES_COLLECTOR" | "DELIVERY_AGENT" }[] = [
+  // Management & Warehouse - measured by hours worked
+  { jobRole: "Managing Director", category: "MANAGEMENT" },
+  { jobRole: "Supply  chain Manager", category: "MANAGEMENT" },
+  { jobRole: "Finance Manager", category: "MANAGEMENT" },
+  { jobRole: "Warehouse Supervisor", category: "MANAGEMENT" },
+  { jobRole: "Logistics Supervisor", category: "MANAGEMENT" },
+  { jobRole: "Accountant", category: "MANAGEMENT" },
+  { jobRole: "Purchasing Manager", category: "MANAGEMENT" },
+  { jobRole: "Commercial Director", category: "MANAGEMENT" },
+  { jobRole: "HR Executive", category: "MANAGEMENT" },
+  { jobRole: "office boy/girl", category: "MANAGEMENT" },
+  // Sales & Collectors - measured by Bricks visit count
+  { jobRole: "Key Account Manager", category: "SALES_COLLECTOR" },
+  { jobRole: "Collector", category: "SALES_COLLECTOR" },
+  { jobRole: "Senior Account Manager", category: "SALES_COLLECTOR" },
+  { jobRole: "Account Manager", category: "SALES_COLLECTOR" },
+  { jobRole: "Head of sales", category: "SALES_COLLECTOR" },
+  // Delivery Agents - tracked in ZenHR, own pending section (attendance only)
+  { jobRole: "Delivery agent", category: "DELIVERY_AGENT" },
+];
+
 async function main() {
   for (const override of NAME_OVERRIDES) {
     await prisma.employeeNameOverride.upsert({
@@ -26,6 +52,15 @@ async function main() {
     });
   }
   console.log(`Seeded ${NAME_OVERRIDES.length} employee name overrides.`);
+
+  for (const rule of JOB_ROLE_CATEGORIES) {
+    await prisma.jobRoleCategoryRule.upsert({
+      where: { jobRole: rule.jobRole },
+      create: rule,
+      update: rule,
+    });
+  }
+  console.log(`Seeded ${JOB_ROLE_CATEGORIES.length} job role category rules.`);
 
   const adminEmail = process.env.SEED_ADMIN_EMAIL;
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;
