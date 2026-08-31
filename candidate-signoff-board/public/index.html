@@ -348,6 +348,7 @@ let editingId = null;            // candidate id currently open in the edit form
 const editScores = {};           // per-candidate score while editing
 const editCriteriaCount = {};    // per-candidate criteria row counter while editing
 let activeCeoTab = 'pending';    // 'pending' | 'hold' | 'rejected' | 'approved' — reviewing view tab
+let activeHrTab = 'pending';     // 'pending' | 'hold' | 'rejected' | 'approved' — screening view tab
 
 /* ============ Utilities ============ */
 function escapeHtml(str){
@@ -419,26 +420,30 @@ async function loadCandidates(isManual){
 /* ============ Rendering ============ */
 function renderBoard(){
   const root = document.getElementById('boardRoot');
+  root.innerHTML = currentRole === 'ceo' ? renderCeoTabs() : renderHrTabs();
+}
 
-  if(currentRole === 'ceo'){
-    root.innerHTML = renderCeoTabs();
-    return;
-  }
+function renderHrTabs(){
+  const tabs = [
+    { key:'pending', label:'Pending', list: candidates.filter(c => c.status === 'pending' && !c.onHold), emptyMessage:'No candidates waiting on the reviewer right now.' },
+    { key:'hold', label:'On Hold', list: candidates.filter(c => c.status === 'pending' && c.onHold), emptyMessage:'No candidates on hold.' },
+    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected'), emptyMessage:'No rejected candidates yet.' },
+    { key:'approved', label:'Approved', list: candidates.filter(c => c.status === 'approved'), emptyMessage:'No approved candidates yet.' },
+  ];
 
-  const pending = candidates.filter(c => c.status === 'pending');
-  const decided = candidates.filter(c => c.status !== 'pending');
+  let tabBar = `<div class="ceo-tabs">`;
+  tabs.forEach(t => {
+    tabBar += `<button class="ceo-tab-btn${activeHrTab === t.key ? ' active' : ''}" onclick="setHrTab('${t.key}')">${t.label}<span class="tab-count">${t.list.length}</span></button>`;
+  });
+  tabBar += `</div>`;
 
-  let html = '';
+  const active = tabs.find(t => t.key === activeHrTab) || tabs[0];
+  return tabBar + renderGrouped(active.list, false, active.emptyMessage);
+}
 
-  html += `<div class="section-head"><h3>Waiting for sign-off</h3><span class="count">${pending.length} pending</span></div>`;
-  html += renderGrouped(pending, false);
-
-  if(decided.length){
-    html += `<div class="section-head decided"><h3>Decided — needs your action</h3><span class="count">${decided.length}</span></div>`;
-    html += renderGrouped(decided, false);
-  }
-
-  root.innerHTML = html;
+function setHrTab(key){
+  activeHrTab = key;
+  renderBoard();
 }
 
 function renderCeoTabs(){
