@@ -28,10 +28,26 @@ export async function GET(req: NextRequest) {
     to: to.toISOString().slice(0, 10),
   };
 
-  await syncBranches();
-  await syncEmployees();
-  await syncAttendance(range);
-  await syncVisits({ from: from.toISOString(), to: to.toISOString() });
+  const steps: string[] = [];
+  try {
+    steps.push("syncBranches");
+    await syncBranches();
+    steps.push("syncEmployees");
+    await syncEmployees();
+    steps.push("syncAttendance");
+    await syncAttendance(range);
+    steps.push("syncVisits");
+    await syncVisits({ from: from.toISOString(), to: to.toISOString() });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        ok: false,
+        failedAt: steps[steps.length - 1],
+        error: err instanceof Error ? err.message : String(err),
+      },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json({ ok: true, range });
 }
