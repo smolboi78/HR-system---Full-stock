@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { isEgyptHoliday } from "./holidays";
 
 export interface DateRange {
   from: Date; // inclusive
@@ -30,17 +31,17 @@ function eachDate(from: Date, to: Date): Date[] {
 }
 
 // Working days in range for a branch, based on ZenHR's days_off weekday
-// configuration. Does not yet account for public holidays - a reasonable
-// phase-1 approximation; can be refined once ZenHR's holiday calendar is
-// synced too. Returns the actual set of date strings (not just a count) so
-// absences can be matched against specific days rather than a raw total -
-// otherwise an employee clocking in on an off day (e.g. overtime) would
-// silently cancel out a real absence on an actual working day.
+// configuration and the Egypt national holiday calendar. Returns the actual
+// set of date strings (not just a count) so absences can be matched against
+// specific days rather than a raw total - otherwise an employee clocking in
+// on an off day (e.g. overtime) would silently cancel out a real absence on
+// an actual working day.
 function workingDatesInRange(range: DateRange, daysOff: number[]): Set<string> {
   const daysOffSet = new Set(daysOff);
   const today = new Date();
   const dates = eachDate(range.from, range.to).filter((d) => {
     if (d > today) return false; // don't count future days as "absent"
+    if (isEgyptHoliday(d)) return false;
     return !daysOffSet.has(d.getUTCDay());
   });
   return new Set(dates.map((d) => d.toISOString().slice(0, 10)));
