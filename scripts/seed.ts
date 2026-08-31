@@ -62,6 +62,7 @@ async function main() {
   }
   console.log(`Seeded ${JOB_ROLE_CATEGORIES.length} job role category rules.`);
 
+  // Single-admin shortcut, handy for local dev.
   const adminEmail = process.env.SEED_ADMIN_EMAIL;
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;
   if (adminEmail && adminPassword) {
@@ -77,10 +78,37 @@ async function main() {
       update: { passwordHash, role: "ADMIN" },
     });
     console.log(`Seeded admin user ${adminEmail}.`);
-  } else {
-    console.log(
-      "SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD not set - skipped creating an admin user."
-    );
+  }
+
+  // Multi-manager form for production: SEED_MANAGERS is a JSON array of
+  // { email, password, name, role? } - role defaults to "ADMIN". Passwords
+  // never live in source; they're only ever passed in as an env var.
+  const managersJson = process.env.SEED_MANAGERS;
+  if (managersJson) {
+    let managers: { email: string; password: string; name: string; role?: "ADMIN" | "MANAGER" }[];
+    try {
+      managers = JSON.parse(managersJson);
+    } catch (err) {
+      throw new Error(`SEED_MANAGERS is not valid JSON: ${err instanceof Error ? err.message : err}`);
+    }
+    for (const m of managers) {
+      const passwordHash = await bcrypt.hash(m.password, 10);
+      await prisma.managerUser.upsert({
+        where: { email: m.email.toLowerCase() },
+        create: {
+          email: m.email.toLowerCase(),
+          passwordHash,
+          name: m.name,
+          role: m.role ?? "ADMIN",
+        },
+        update: { passwordHash, name: m.name, role: m.role ?? "ADMIN" },
+      });
+      console.log(`Seeded manager user ${m.email}.`);
+    }
+  }
+
+  if (!adminEmail && !managersJson) {
+    console.log("No SEED_ADMIN_EMAIL or SEED_MANAGERS set - skipped creating any login.");
   }
 }
 
