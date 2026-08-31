@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { syncBranches, syncEmployees, syncAttendance } from "@/lib/sync";
+import { syncBranches, syncEmployees, syncAttendance, syncVisits } from "@/lib/sync";
 
 export const maxDuration = 300;
 
@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
   await syncBranches();
   await syncEmployees();
   await syncAttendance(range);
+  await syncVisits({ from: from.toISOString(), to: to.toISOString() });
 
   return NextResponse.json({ ok: true, range });
 }
