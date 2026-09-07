@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, downloadUrl } from "../api/client";
+import { api, authedUrl } from "../api/client";
 import type {
   CategoryRule,
   EmployeeCard,
@@ -339,7 +339,7 @@ function SyncSection() {
     <Section title="Data sync" description="Pulls the trailing 10-day window from ZenHR and Bricks. Runs on a schedule; you can also trigger it manually.">
       <div className="flex items-center gap-2">
         <a
-          href={downloadUrl("/sync/zenhr/connect")}
+          href={authedUrl("/sync/zenhr/connect")}
           className="text-sm border border-line rounded-lg px-3 py-1.5 hover:border-ink/30 transition-colors"
         >
           Connect ZenHR

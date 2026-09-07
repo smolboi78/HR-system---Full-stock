@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, downloadUrl } from "../api/client";
+import { api, authedUrl } from "../api/client";
 import type { EmployeeProfile } from "../api/types";
 import Avatar from "../components/Avatar";
 import PeriodPicker from "../components/PeriodPicker";
@@ -76,13 +76,13 @@ export default function Profile() {
         <div className="flex items-center gap-3">
           <PeriodPicker period={period} onChange={setPeriod} />
           <a
-            href={downloadUrl(`/reports/employee/${id}/pdf?period_start=${period.start}&period_end=${period.end}`)}
+            href={authedUrl(`/reports/employee/${id}/pdf?period_start=${period.start}&period_end=${period.end}`)}
             className="text-sm border border-line rounded-lg px-3 py-1.5 hover:border-ink/30 transition-colors"
           >
             PDF
           </a>
           <a
-            href={downloadUrl(`/reports/employee/${id}/excel?period_start=${period.start}&period_end=${period.end}`)}
+            href={authedUrl(`/reports/employee/${id}/excel?period_start=${period.start}&period_end=${period.end}`)}
             className="text-sm border border-line rounded-lg px-3 py-1.5 hover:border-ink/30 transition-colors"
           >
             Excel

@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, ApiError } from "../api/client";
+import { api, ApiError, clearToken, getToken, setToken } from "../api/client";
 import type { User } from "../api/types";
 
 interface AuthState {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: () => void;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -16,20 +16,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!getToken()) {
+      setLoading(false);
+      return;
+    }
     api
       .get<User>("/auth/me")
       .then(setUser)
-      .catch(() => setUser(null))
+      .catch(() => clearToken())
       .finally(() => setLoading(false));
   }, []);
 
   async function login(email: string, password: string) {
-    const loggedIn = await api.post<User>("/auth/login", { email, password });
+    const { user: loggedIn, access_token } = await api.post<{ user: User; access_token: string }>(
+      "/auth/login",
+      { email, password }
+    );
+    setToken(access_token);
     setUser(loggedIn);
   }
 
-  async function logout() {
-    await api.post("/auth/logout");
+  function logout() {
+    clearToken();
     setUser(null);
   }
 

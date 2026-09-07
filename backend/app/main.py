@@ -1,16 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import get_settings
 from app.routers import auth, employees, reports, settings, sync
 
 app = FastAPI(title="Full Stock HR Performance Dashboard")
 
-settings_obj = get_settings()
+# Auth is a Bearer token the frontend sends explicitly (not a cookie), so
+# there's nothing credential-bearing for the browser to protect here -
+# any origin can call this API as long as it has a valid token.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings_obj.frontend_origin],
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

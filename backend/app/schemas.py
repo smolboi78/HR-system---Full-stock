@@ -23,6 +23,11 @@ class UserOut(BaseModel):
     active: bool
 
 
+class LoginResponse(BaseModel):
+    user: UserOut
+    access_token: str
+
+
 class UserCreateRequest(BaseModel):
     email: EmailStr
     password: str

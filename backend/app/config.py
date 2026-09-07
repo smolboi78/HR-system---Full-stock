@@ -21,13 +21,6 @@ class Settings(BaseSettings):
 
     frontend_origin: str = "http://localhost:5173"
 
-    # Cookie flags for the auth session cookie. Local dev over plain HTTP
-    # needs secure=False; a real deploy with the frontend on a different
-    # origin (e.g. Vercel) needs secure=True + samesite=none for the
-    # cross-site cookie to actually be sent.
-    cookie_secure: bool = False
-    cookie_samesite: str = "lax"
-
     seed_admin_email: str = "admin@example.com"
     seed_admin_password: str = "change-me"
     seed_admin_name: str = "Admin"

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { downloadUrl } from "../api/client";
+import { authedUrl } from "../api/client";
 import PeriodPicker from "../components/PeriodPicker";
 import { lastNDays, type Period } from "../lib/period";
 
@@ -22,13 +22,13 @@ export default function Reports() {
         </div>
         <div className="flex items-center gap-2">
           <a
-            href={downloadUrl(`/reports/joint/pdf?period_start=${period.start}&period_end=${period.end}`)}
+            href={authedUrl(`/reports/joint/pdf?period_start=${period.start}&period_end=${period.end}`)}
             className="text-sm border border-line rounded-lg px-3 py-1.5 hover:border-ink/30 transition-colors"
           >
             PDF
           </a>
           <a
-            href={downloadUrl(`/reports/joint/excel?period_start=${period.start}&period_end=${period.end}`)}
+            href={authedUrl(`/reports/joint/excel?period_start=${period.start}&period_end=${period.end}`)}
             className="text-sm border border-line rounded-lg px-3 py-1.5 hover:border-ink/30 transition-colors"
           >
             Excel
