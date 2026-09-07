@@ -66,17 +66,22 @@ spec explicitly wants each employee's actual working-day pattern from their
 different endpoint (shift/schedule assignment, likely per-employee or
 per-employee-group) that hasn't been looked at yet.
 
-## 6. Bricks visit records — ASSUMED, from a spec document, never called live
+## 6. Bricks visit records — CONFIRMED
 
-`POST /api/v1/visits/list` and `/api/v1/visits/count` per `src/lib/bricks.ts`,
-written from an OpenAPI spec provided in an earlier session (not available in
-this one) but never exercised against the live API. Fields in use:
-`id`, `owner_id`, `owner.name`, `contact_id`, `contact.name`, `status`,
-`is_planned`, `is_successful`, `visit_time`, `duration`. Worth a live call to
-confirm field names/types and to check whether visit records carry anything
-extra now that Delivery Agents are fully onboarded (route/order linkage,
-delivery-specific fields) that the "hours + visit count, not blended" metric
-for that role might want.
+`POST /api/v1/visits/list` and `/api/v1/visits/count` against
+`https://fullstock.bricks-rep.com`, `X-BRICKS-API-KEY` header auth, per the
+official OpenAPI spec (`visitslistcount.openapi.json`, provided directly).
+`backend/app/services/bricks_client.py` matches it exactly: request shape
+(`filters`/`pagination`/`preloads`/`sort` on list, `filters` on count),
+response shape (`{visits: [...]}` / `{count: N}`), and every field the sync
+code reads off a `VisitResp` - `id`, `owner_id`, `owner.name`, `contact_id`,
+`contact.name` (via `preloads.contact`), `status`, `is_planned`,
+`is_successful`, `visit_time`, `duration` (milliseconds) - all present with
+matching types. No code changes needed.
+
+Noted for later, not blocking: the spec doesn't show any delivery/route-
+specific fields beyond the general visit fields above, so nothing extra to
+pull in for Delivery Agents' "hours + visit count" metric right now.
 
 ## What would unblock this
 
