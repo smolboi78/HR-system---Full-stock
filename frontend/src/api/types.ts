@@ -40,19 +40,14 @@ export interface AttendanceDay {
   note: string | null;
 }
 
-export interface LeaveTransaction {
-  leave_date: string;
-  hours: number;
-  leave_type: string;
+export interface TimeoffTransaction {
+  from_date: string;
+  to_date: string;
+  amount: number;
   status: string;
-  note: string | null;
-}
-
-export interface VacationTransaction {
-  vacation_date: string;
-  status: string;
-  vacation_type: string | null;
-  note: string | null;
+  notes: string | null;
+  type_name: string | null;
+  is_vacation: boolean;
 }
 
 export interface Visit {
@@ -75,10 +70,9 @@ export interface EmployeeProfile {
   hiring_date: string | null;
   onboarding_status: "PENDING_CONFIRMATION" | "ACTIVE";
 
+  // ZenHR has no vacation-balance endpoint (confirmed) - purely
+  // admin-maintained, not synced.
   vacation_balance_days: number | null;
-  vacation_balance_override_days: number | null;
-  vacation_balance_effective_days: number | null;
-  vacation_balance_synced_at: string | null;
 
   period_hours: number;
   period_visits: number;
@@ -87,8 +81,7 @@ export interface EmployeeProfile {
   period_days_absent: number;
 
   attendance: AttendanceDay[];
-  leave: LeaveTransaction[];
-  vacation: VacationTransaction[];
+  timeoff: TimeoffTransaction[];
   visits: Visit[];
 }
 

@@ -12,11 +12,17 @@ from app.models import (
     AttendanceRecord,
     Employee,
     EmployeeCategory,
-    LeaveTransaction,
     OnboardingStatus,
-    VacationTransaction,
+    TimeoffTransaction,
+    TimeoffType,
     Visit,
 )
+
+DEMO_TIMEOFF_TYPES = [
+    {"id": 1, "name": "Annual Vacation", "class_name": "AnnualVacation"},
+    {"id": 2, "name": "Sick Leave", "class_name": "SickLeave"},
+    {"id": 3, "name": "Personal Excuse", "class_name": "Excuse"},
+]
 
 DEMO_EMPLOYEES = [
     {"name": "Mona Ibrahim", "title": "Branch Manager", "department": "Operations", "manager": None, "category": EmployeeCategory.MANAGEMENT},
@@ -36,6 +42,11 @@ WEEKDAY_OFF = [5, 6]  # Friday, Saturday
 def main() -> None:
     db = SessionLocal()
     try:
+        for t in DEMO_TIMEOFF_TYPES:
+            if not db.get(TimeoffType, t["id"]):
+                db.add(TimeoffType(**t))
+        db.flush()
+
         for idx, spec in enumerate(DEMO_EMPLOYEES, start=1000):
             existing = db.query(Employee).filter_by(zenhr_employee_id=idx).first()
             if existing:
@@ -104,23 +115,28 @@ def main() -> None:
             for _ in range(2):
                 leave_day = today - timedelta(days=random.randint(1, 55))
                 db.add(
-                    LeaveTransaction(
+                    TimeoffTransaction(
                         employee_id=employee.id,
-                        leave_date=leave_day,
-                        hours=random.choice([1, 2, 4]),
-                        leave_type=random.choice(["personal_excuse", "medical"]),
-                        status="Approved",
+                        zenhr_transaction_id=random.randint(100000, 999999),
+                        timeoff_type_id=random.choice([2, 3]),
+                        from_date=leave_day,
+                        to_date=leave_day,
+                        amount=random.choice([1, 2, 4]),
+                        status="approved",
                     )
                 )
 
             for _ in range(2):
                 vac_day = today - timedelta(days=random.randint(1, 55))
                 db.add(
-                    VacationTransaction(
+                    TimeoffTransaction(
                         employee_id=employee.id,
-                        vacation_date=vac_day,
-                        status=random.choice(["Approved", "Added by HR", "Pending"]),
-                        vacation_type="Annual",
+                        zenhr_transaction_id=random.randint(100000, 999999),
+                        timeoff_type_id=1,
+                        from_date=vac_day,
+                        to_date=vac_day,
+                        amount=1,
+                        status=random.choice(["approved", "added_by_hr", "pending"]),
                     )
                 )
 

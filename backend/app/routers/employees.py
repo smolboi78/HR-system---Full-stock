@@ -9,17 +9,17 @@ from app.models import (
     AttendanceRecord,
     Employee,
     EmployeeCategory,
-    LeaveTransaction,
     OnboardingStatus,
+    TimeoffTransaction,
     User,
-    VacationTransaction,
     Visit,
 )
 from app.schemas import (
     ConfirmEmployeeRequest,
     EmployeeCardOut,
     EmployeeProfileOut,
-    VacationOverrideRequest,
+    TimeoffTransactionOut,
+    VacationBalanceRequest,
 )
 from app.services.metrics import compute_period_summary
 
@@ -107,26 +107,28 @@ def get_employee_profile(
         .order_by(AttendanceRecord.attendance_date.desc())
         .all()
     )
-    leave = (
-        db.query(LeaveTransaction)
+    timeoff_rows = (
+        db.query(TimeoffTransaction)
         .filter(
-            LeaveTransaction.employee_id == employee.id,
-            LeaveTransaction.leave_date >= start,
-            LeaveTransaction.leave_date <= end,
+            TimeoffTransaction.employee_id == employee.id,
+            TimeoffTransaction.from_date <= end,
+            TimeoffTransaction.to_date >= start,
         )
-        .order_by(LeaveTransaction.leave_date.desc())
+        .order_by(TimeoffTransaction.from_date.desc())
         .all()
     )
-    vacation = (
-        db.query(VacationTransaction)
-        .filter(
-            VacationTransaction.employee_id == employee.id,
-            VacationTransaction.vacation_date >= start,
-            VacationTransaction.vacation_date <= end,
+    timeoff = [
+        TimeoffTransactionOut(
+            from_date=t.from_date,
+            to_date=t.to_date,
+            amount=t.amount,
+            status=t.status,
+            notes=t.notes,
+            type_name=t.timeoff_type.name if t.timeoff_type else None,
+            is_vacation=bool(t.timeoff_type and t.timeoff_type.class_name == "AnnualVacation"),
         )
-        .order_by(VacationTransaction.vacation_date.desc())
-        .all()
-    )
+        for t in timeoff_rows
+    ]
     visits = (
         db.query(Visit)
         .filter(
@@ -137,9 +139,6 @@ def get_employee_profile(
         .order_by(Visit.visit_time.desc())
         .all()
     )
-
-    override = employee.vacation_balance_override_days
-    effective = override if override is not None else employee.vacation_balance_days
 
     return EmployeeProfileOut(
         id=employee.id,
@@ -153,17 +152,13 @@ def get_employee_profile(
         hiring_date=employee.hiring_date,
         onboarding_status=employee.onboarding_status,
         vacation_balance_days=employee.vacation_balance_days,
-        vacation_balance_override_days=employee.vacation_balance_override_days,
-        vacation_balance_effective_days=effective,
-        vacation_balance_synced_at=employee.vacation_balance_synced_at,
         period_hours=summary.hours,
         period_visits=summary.visits,
         period_days_present=summary.days_present,
         period_days_expected=summary.days_expected,
         period_days_absent=summary.days_absent,
         attendance=attendance,
-        leave=leave,
-        vacation=vacation,
+        timeoff=timeoff,
         visits=visits,
     )
 
@@ -220,14 +215,14 @@ def confirm_new_hire(
     )
 
 
-@router.put("/{employee_id}/vacation-override")
-def set_vacation_override(
+@router.put("/{employee_id}/vacation-balance")
+def set_vacation_balance(
     employee_id: str,
-    payload: VacationOverrideRequest,
+    payload: VacationBalanceRequest,
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> dict:
     employee = _get_employee_or_404(db, employee_id)
-    employee.vacation_balance_override_days = payload.override_days
+    employee.vacation_balance_days = payload.balance_days
     db.commit()
     return {"ok": True}

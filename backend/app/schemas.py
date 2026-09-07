@@ -72,23 +72,14 @@ class AttendanceDayOut(BaseModel):
     note: str | None
 
 
-class LeaveTransactionOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    leave_date: date
-    hours: float
-    leave_type: str
+class TimeoffTransactionOut(BaseModel):
+    from_date: date
+    to_date: date
+    amount: float
     status: str
-    note: str | None
-
-
-class VacationTransactionOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    vacation_date: date
-    status: str
-    vacation_type: str | None
-    note: str | None
+    notes: str | None
+    type_name: str | None
+    is_vacation: bool
 
 
 class VisitOut(BaseModel):
@@ -113,10 +104,9 @@ class EmployeeProfileOut(BaseModel):
     hiring_date: date | None
     onboarding_status: str
 
+    # ZenHR has no vacation-balance endpoint (confirmed) - purely
+    # admin-maintained, not synced.
     vacation_balance_days: float | None
-    vacation_balance_override_days: float | None
-    vacation_balance_effective_days: float | None
-    vacation_balance_synced_at: datetime | None
 
     period_hours: float
     period_visits: int
@@ -125,13 +115,12 @@ class EmployeeProfileOut(BaseModel):
     period_days_absent: int
 
     attendance: list[AttendanceDayOut]
-    leave: list[LeaveTransactionOut]
-    vacation: list[VacationTransactionOut]
+    timeoff: list[TimeoffTransactionOut]
     visits: list[VisitOut]
 
 
-class VacationOverrideRequest(BaseModel):
-    override_days: float | None
+class VacationBalanceRequest(BaseModel):
+    balance_days: float | None
 
 
 class ConfirmEmployeeRequest(BaseModel):

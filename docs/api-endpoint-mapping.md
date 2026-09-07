@@ -1,117 +1,168 @@
 # ZenHR + Bricks API endpoint mapping
 
-Status of each endpoint the rebuilt dashboard needs, as of 2026-09-07. This
-covers the six endpoints called out for the directory/profile build:
-employee list, accumulative attendance report, leave transactions, vacation
-balances, shift patterns, and Bricks visit records.
+Status of every endpoint the dashboard needs, current as of the ZenHR
+Postman collection (`ZenHR_APIs_Documentation.postman_collection.json`,
+provided directly) and the Bricks OpenAPI spec (`visitslistcount.openapi.json`,
+also provided directly). Both are now source-of-truth references, not
+guesses — see each section for what's confirmed vs. still open.
 
-**Why this file exists instead of code:** this session has no ZenHR/Bricks
-credentials in its environment and no network egress to `api-docs.zenhr.com`
-(blocked by the sandbox's egress proxy) or to the Bricks instance. The
-existing client code in `src/lib/zenhr.ts` / `src/lib/bricks.ts` (from the
-prior "phase 1" build) was itself written the same way — several fields are
-flagged in comments as unconfirmed guesses, never validated against a real
-response. Building the new leave/vacation/shift data model on more guesses
-would very likely mean reworking the Prisma schema and sync logic once real
-responses are seen, so this file separates **confirmed** (seen in a real
-response or documented with certainty) from **assumed** (best guess, needs
-verification) before that code gets written.
+## 1. Employee master data — CONFIRMED
 
-## 1. Employee list — ASSUMED, partially confirmed
+`GET /api/v3/branches/{branch_id}/employees` (paginated). Fields in use:
+`id`, `branch_id`, `employment_number`, `active`, `hiring_date`,
+`termination_date`, `user.name.en.{first_name,last_name}`.
 
-`GET /api/v3/branches/{branch_id}/employees` (paginated), per
-`backend/app/services/zenhr_client.py` (rebuilt on the Python/FastAPI stack;
-the field-name guesses below carried over from the original Next.js attempt
-since neither was ever validated against a real response).
+**Job title, department, and manager are NOT on this endpoint** - they
+live on a separate per-employee "professional data" record (#2 below).
+Photo/avatar URL: not present on this endpoint either; not yet modeled.
 
-- Confirmed shape: `id`, `branch_id`, `employment_number`, `active`,
-  `hiring_date`, `termination_date`, `user.name.en.{first_name,last_name}`.
-- **Unconfirmed: job title, department, and direct manager fields.**
-  `extract_job_role()` / `extract_department()` / `extract_manager()` each
-  try several candidate field names because none has been seen in a real
-  response:
-  - job title: `job_title`, `position`, `job_position`
-  - department: `department`, `department_name`, `division`
-  - manager: `direct_manager`, `manager`, `line_manager`, `reports_to`
-  This blocks auto-assigning metric type from job title/department (now
-  department-first, job-title-fallback - see `DepartmentCategoryRule` /
-  `JobRoleCategoryRule`) and showing the correct manager name until
-  confirmed.
-- Not yet modeled: photo/avatar URL if ZenHR exposes one for the directory
-  card.
+## 2. Professional data (job title / department / manager) — CONFIRMED
 
-## 2. Accumulative attendance report — NEEDS RE-CHECK
+`GET /api/v3/branches/{branch_id}/employees/{employee_id}/professional_data/active`
+returns the employee's current record directly (no need to filter
+`effective_on`/`expires_on` ourselves):
 
-Currently implemented against `/api/v3/branches/{branch_id}/attendance_records`,
-returning per-day `entry_time`/`exit_time`/`missing_status`/`number_of_missings`/
-`suspicious`. This is ZenHR's raw attendance-records endpoint, not necessarily
-the same as the **accumulative attendance report** the spec explicitly asks
-for (business mission, personal excuse, uncompleted shift, unpaid leave, etc.
-as distinct absence reasons — `missing_status` alone doesn't obviously carry
-that granularity). Need to confirm whether ZenHR's API exposes the
-accumulative report as its own endpoint/report export, or whether that detail
-lives in `attendance_records` under a field not yet seen.
+```json
+{
+  "position": { "id": 123, "name": "HR Manager" },
+  "department": { "id": 584, "name": "HR Department" },
+  "manager": { "id": 191211, "name": "123 123" },
+  "site": { "id": 580, "name": "Amman123" },
+  "section": { "id": null, "name": null },
+  "project": { "id": 11102, "name": "Karam Department" },
+  "hierarchy_group": { "id": 4618, "name": "Managers" }
+}
+```
 
-## 3. Leave-by-hour transactions — NOT IMPLEMENTED, NO ENDPOINT KNOWN
+`position.name` → `Employee.job_title`, `department.name` → `Employee.department`,
+`manager.{name,id}` → `Employee.manager_name`/`manager_zenhr_id`.
 
-Nothing in the current codebase touches this. No endpoint path, filters, or
-response shape known. Required for "leave transaction types should stay
-extensible" and full leave/time-off history on the profile.
+**No branch-level bulk endpoint exists for this** - syncing it costs one
+HTTP request per employee (`sync_professional_data()` in `services/sync.py`,
+paced at ~3/s to stay under ZenHR's 15 req/4s limit). For an org with
+hundreds of employees this step alone can take several minutes; that's
+expected, not a bug.
 
-## 4. Vacation-by-day transactions + live balances — NOT IMPLEMENTED, NO ENDPOINT KNOWN
+## 3. Accumulative attendance report — CONFIRMED (endpoint), fields as coded
 
-Nothing in the current codebase touches this. Need the transaction endpoint
-(with `status` values — spec requires distinguishing Approved / Added by HR
-[[count as protected day off]] vs Pending / Withdrawn / Rejected [[don't]])
-and the live balance endpoint (which the spec also wants to support manual
-override on top of).
+`GET /api/v3/branches/{branch_id}/attendance_records`, filterable by
+`filter[attendance_date][from/to]`. Real shape:
 
-## 5. Shift / working-day pattern per employee — NOT IMPLEMENTED, NO ENDPOINT KNOWN
+```json
+{
+  "id": 1,
+  "employee": { "id": 1152, "employment_number": 8 },
+  "attendance_date": "2018-12-03",
+  "entry_time": "2018-12-03T06:00:00.000Z",
+  "exit_time": "2018-12-03T17:00:00.000Z",
+  "missing_status": "complete",
+  "number_of_missings": 0,
+  "suspicious": false
+}
+```
 
-Current schema only has `Branch.daysOff` (weekend at the branch level). The
-spec explicitly wants each employee's actual working-day pattern from their
-**ZenHR shift assignment**, not a per-branch or per-role default — that's a
-different endpoint (shift/schedule assignment, likely per-employee or
-per-employee-group) that hasn't been looked at yet.
+Matches what `services/zenhr_client.py` already reads. `missing_status`
+carries a status string ("complete" seen; the spec's business-mission/
+personal-excuse/uncompleted-shift/unpaid-leave reasons presumably show up
+as other values here) - we store it as-is in `AttendanceRecord.status`,
+free-form, so new values need no schema change. Exact full set of
+`missing_status` values not yet enumerated - will confirm once real
+attendance data flows through.
 
-## 6. Bricks visit records — CONFIRMED
+## 4. Timeoff (vacation + leave, unified) — CONFIRMED
+
+**This replaces the spec's separate "leave-by-hour" and "vacation-by-day"
+concepts with what ZenHR actually has: one unified timeoff system.**
+
+- `GET /api/v3/branches/{branch_id}/timeoffs` - the *types* of timeoff a
+  company has configured (Annual Vacation, sick leave, personal excuse,
+  etc.). Key fields: `id`, `name.en`, `class_name` (e.g. `"AnnualVacation"`
+  marks the type(s) that are the spec's "vacation"; everything else is the
+  spec's "leave"), `is_sick_vacation`. Synced into `TimeoffType`.
+- `GET /api/v3/branches/{branch_id}/timeoff_transactions` - branch-level
+  bulk list (no N+1), filterable by `filter[from_date][from/to]` /
+  `filter[to_date][from/to]`. Shape:
+
+  ```json
+  {
+    "id": 62918,
+    "employee": { "id": 1159 },
+    "timeoff": { "id": 816 },
+    "from_date": "2018-10-08T00:00:00.000+03:00",
+    "to_date": "2018-10-08T00:00:00.000+03:00",
+    "amount": 1,
+    "notes": "",
+    "status": "cancelled"
+  }
+  ```
+
+  Synced into a single `TimeoffTransaction` table (`timeoff_type_id` links
+  back to `TimeoffType`); the profile UI's "Time off" tab shows all of it,
+  with `is_vacation` (derived from `class_name == "AnnualVacation"`) used
+  to distinguish vacation entries from other leave.
+
+**Still unconfirmed: exact status string spellings.** The spec's
+Approved / Added by HR (protected day off) vs. Pending / Withdrawn /
+Rejected (not protected) distinction assumes specific strings; the only
+values seen in the example data are `"cancelled"` and `"withdrawn"` (real
+data, but a thin sample). `models.PROTECTED_TIMEOFF_STATUSES` currently
+guesses `{"approved", "added_by_hr", "added by hr"}` - update once more
+real status values are seen.
+
+## 5. Vacation balance — NO ENDPOINT EXISTS
+
+Checked every endpoint in ZenHR's 265-entry Postman collection - there is
+**no vacation-balance endpoint**, live or otherwise (the closest is a
+`timeoff_balance` field buried in payroll/salary transaction records, which
+isn't a current, queryable balance). `Employee.vacation_balance_days` is
+therefore **purely admin-maintained** - set once from whatever ZenHR's UI
+shows, then kept current manually. There's no "sync" to fall out of date
+with. (The originally-planned override-on-top-of-a-synced-value UI was
+simplified away for this reason - see `PUT /employees/{id}/vacation-balance`.)
+
+## 6. Shift assignment (per-employee working-day pattern) — CONFIRMED
+
+Two branch-level bulk endpoints (no N+1):
+
+- `GET /api/v3/branches/{branch_id}/work_shifts` - each shift's own
+  definition, including `days_off`: an array of ZenHR weekday strings,
+  `"0"` (Sunday) through `"6"` (Saturday) - e.g. `["5", "6"]` for a
+  Friday/Saturday weekend (confirmed against real example data).
+- `GET /api/v3/branches/{branch_id}/employee_shifts` - which `work_shift`
+  applies to which `employee` for which `[from_date, to_date]` range.
+
+`services/zenhr_client.zenhr_weekday_to_iso()` converts ZenHR's 0=Sunday
+convention to the ISO weekday numbers (1=Monday..7=Sunday) used everywhere
+else in the app. `sync_shifts()` picks whichever assignment currently
+covers today's date (falling back to the most recent one) and sets
+`Employee.off_weekdays` from that shift's `days_off`.
+
+## 7. Bricks visit records — CONFIRMED
 
 `POST /api/v1/visits/list` and `/api/v1/visits/count` against
 `https://fullstock.bricks-rep.com`, `X-BRICKS-API-KEY` header auth, per the
-official OpenAPI spec (`visitslistcount.openapi.json`, provided directly).
-`backend/app/services/bricks_client.py` matches it exactly: request shape
-(`filters`/`pagination`/`preloads`/`sort` on list, `filters` on count),
-response shape (`{visits: [...]}` / `{count: N}`), and every field the sync
-code reads off a `VisitResp` - `id`, `owner_id`, `owner.name`, `contact_id`,
-`contact.name` (via `preloads.contact`), `status`, `is_planned`,
-`is_successful`, `visit_time`, `duration` (milliseconds) - all present with
-matching types. No code changes needed.
+official OpenAPI spec. `backend/app/services/bricks_client.py` matches it
+exactly - request shape, response shape, and every field the sync code
+reads off a `VisitResp`. No code changes needed.
 
-Noted for later, not blocking: the spec doesn't show any delivery/route-
-specific fields beyond the general visit fields above, so nothing extra to
-pull in for Delivery Agents' "hours + visit count" metric right now.
+## OAuth scopes — fixed, was wrong
 
-## What would unblock this
+A real `who_am_i` response's `token_info.scopes` confirmed ZenHR scopes use
+**dots**, not colons: `read.branch`, `read.employee`, `read.professional_info`,
+`read.timeoff`, `read.attendance_record`. The original client code requested
+`read:employee read:branch read:attendance_record` (colons, and missing the
+professional_info/timeoff scopes needed for #2 and #4 above) - fixed in
+`zenhr_client.SCOPES`.
 
-Any one of the following would let me confirm the three unknown endpoints
-(leave-by-hour, vacation-by-day/balances, shift pattern) and correct the two
-partially-known ones (job title field, accumulative attendance report) before
-the schema and sync/UI code gets written against them:
+## What's still genuinely open
 
-1. Add `ZENHR_CLIENT_ID` / `ZENHR_CLIENT_SECRET` (and complete the OAuth
-   connect flow once) plus `BRICKS_API_KEY` as environment variables in this
-   Claude Code environment's config, so the sync code can call the real APIs
-   and I can inspect actual responses.
-2. Paste in (or attach) the relevant pages of ZenHR's API docs
-   (`api-docs.zenhr.com`) for these five report/endpoint types, and the
-   Bricks OpenAPI spec — this session can't reach either domain itself
-   (egress to `api-docs.zenhr.com` is proxy-blocked).
-3. Paste a few sample JSON responses (redact any real employee PII) for each
-   of: employee list, accumulative attendance report, a leave-by-hour
-   transaction, a vacation-by-day transaction + balance, an employee's shift
-   assignment, and a Bricks visit record.
+- Exact `missing_status` values beyond `"complete"` (attendance).
+- Exact timeoff `status` values beyond `"cancelled"`/`"withdrawn"` (affects
+  which count as a protected day off).
+- Whether `professional_data` 404s for any employee who's never had one set
+  (handled gracefully - `get_employee_active_professional_data` returns
+  `None` and that employee just keeps whatever job title/department/manager
+  they already had).
 
-Once one of those is available I'll finalize this mapping, update
-`src/lib/zenhr.ts` / `src/lib/bricks.ts` accordingly, extend the Prisma
-schema for leave/vacation/shift data, and move on to the card-grid directory
-and profile views.
+All three will confirm themselves the first time a real sync runs - no
+further blocker to that beyond completing the ZenHR OAuth connect flow.

@@ -1,13 +1,8 @@
 """ZenHR API v3 client.
 
-Status of each endpoint used here is tracked in
-docs/api-endpoint-mapping.md - short version: employee list and attendance
-records are carried over from a prior build and only partially confirmed
-(job title field name is a guess); leave-by-hour, vacation-by-day/balances,
-and shift-assignment (per-employee working days) have NO confirmed endpoint
-yet and the functions below are best-effort placeholders that raise
-NotImplementedError until a real endpoint is confirmed - see the docstring
-on each.
+Endpoint shapes below are confirmed against ZenHR's own published Postman
+collection (not guessed) - see docs/api-endpoint-mapping.md for the full
+breakdown of what's confirmed vs. still assumed.
 
 Auth model: OAuth 2.0 authorization_code grant for the one-time bootstrap,
 then refresh_token grant afterwards.
@@ -25,6 +20,9 @@ from app.models import ZenhrOAuthToken
 
 EXPIRY_BUFFER_SECONDS = 60
 
+# Confirmed from a real who_am_i response's token_info.scopes.
+SCOPES = "read.branch read.employee read.professional_info read.timeoff read.attendance_record"
+
 
 def _api_origin() -> str:
     return f"https://{get_settings().zenhr_base_url}"
@@ -36,7 +34,7 @@ def get_authorize_url(state: str) -> str:
         "client_id": settings.zenhr_client_id,
         "redirect_uri": settings.zenhr_redirect_uri,
         "response_type": "code",
-        "scope": "read:employee read:branch read:attendance_record",
+        "scope": SCOPES,
         "state": state,
     }
     query = httpx.QueryParams(params)
@@ -99,7 +97,7 @@ def _get_valid_access_token(db: Session) -> str:
     return _refresh_token(db, row.refresh_token)
 
 
-def _get(db: Session, path: str, params: dict[str, Any] | None = None) -> Any:
+def _get(db: Session, path: str, params: dict[str, Any] | None = None) -> httpx.Response:
     token = _get_valid_access_token(db)
     resp = httpx.get(
         f"{_api_origin()}{path}",
@@ -108,14 +106,14 @@ def _get(db: Session, path: str, params: dict[str, Any] | None = None) -> Any:
         timeout=30,
     )
     resp.raise_for_status()
-    return resp.json()
+    return resp
 
 
 def _fetch_all_pages(db: Session, path: str, params: dict[str, Any], page_delay_s: float = 0.3) -> list[dict]:
     all_rows: list[dict] = []
     page = 1
     while True:
-        resp = _get(db, path, {**params, "page": page, "limit": 200})
+        resp = _get(db, path, {**params, "page": page, "limit": 200}).json()
         all_rows.extend(resp["data"])
         if page >= resp["pagination"]["total_pages"]:
             break
@@ -124,7 +122,7 @@ def _fetch_all_pages(db: Session, path: str, params: dict[str, Any], page_delay_
     return all_rows
 
 
-# ---------- Confirmed-ish endpoints (carried over from the prior build) ----------
+# ---------- Company / branches / employee master data ----------
 
 
 def list_branches(db: Session) -> list[dict]:
@@ -135,62 +133,7 @@ def list_employees(db: Session, branch_id: int) -> list[dict]:
     return _fetch_all_pages(db, f"/api/v3/branches/{branch_id}/employees", {})
 
 
-JOB_ROLE_FIELD_CANDIDATES = ("job_title", "position", "job_position")
-
-
-def _extract_string_or_named(emp: dict, candidates: tuple[str, ...]) -> str | None:
-    for field in candidates:
-        value = emp.get(field)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-        if isinstance(value, dict):
-            name = (value.get("name") or {}).get("en")
-            if name:
-                return name.strip()
-    return None
-
-
-def extract_job_role(emp: dict) -> str | None:
-    """Tries every candidate field name seen in other ZenHR integrations.
-    UNCONFIRMED - update once a real employee response has been inspected;
-    see docs/api-endpoint-mapping.md #1."""
-    return _extract_string_or_named(emp, JOB_ROLE_FIELD_CANDIDATES)
-
-
-DEPARTMENT_FIELD_CANDIDATES = ("department", "department_name", "division")
-
-
-def extract_department(emp: dict) -> str | None:
-    """UNCONFIRMED, same caveat as extract_job_role - see
-    docs/api-endpoint-mapping.md #1."""
-    return _extract_string_or_named(emp, DEPARTMENT_FIELD_CANDIDATES)
-
-
-MANAGER_FIELD_CANDIDATES = ("direct_manager", "manager", "line_manager", "reports_to")
-
-
-def extract_manager(emp: dict) -> tuple[str | None, int | None]:
-    """Returns (manager_name, manager_zenhr_employee_id). UNCONFIRMED, same
-    caveat as extract_job_role - see docs/api-endpoint-mapping.md #1."""
-    for field in MANAGER_FIELD_CANDIDATES:
-        value = emp.get(field)
-        if isinstance(value, dict):
-            manager_id = value.get("id")
-            name = _extract_string_or_named(value, ("name",)) or value.get("full_name")
-            if isinstance(name, dict):
-                name = (name.get("en") or {}).get("first_name")
-            if name or manager_id:
-                return (name.strip() if isinstance(name, str) else None), manager_id
-        elif isinstance(value, str) and value.strip():
-            return value.strip(), None
-    return None, None
-
-
 def list_attendance_records(db: Session, branch_id: int, date_from: str, date_to: str) -> list[dict]:
-    """Pulls ZenHR's attendance_records endpoint. NEEDS RE-CHECK against the
-    actual accumulative attendance report the spec asks for (business
-    mission / personal excuse / uncompleted shift / unpaid leave as distinct
-    reasons) - see docs/api-endpoint-mapping.md #2."""
     return _fetch_all_pages(
         db,
         f"/api/v3/branches/{branch_id}/attendance_records",
@@ -198,37 +141,69 @@ def list_attendance_records(db: Session, branch_id: int, date_from: str, date_to
     )
 
 
-# ---------- Unconfirmed endpoints - see docs/api-endpoint-mapping.md ----------
+# ---------- Professional data (job title / department / manager) ----------
+#
+# Confirmed: GET .../employees/{id}/professional_data/active returns the
+# employee's CURRENT record directly (no need to filter effective_on/
+# expires_on ourselves) - {position: {id,name}, department: {id,name},
+# manager: {id,name}, site, section, project, hierarchy_group}. Per-employee
+# only - no branch-level bulk endpoint exists for this, so syncing it is
+# necessarily one request per employee.
 
 
-def list_leave_transactions(db: Session, branch_id: int, date_from: str, date_to: str) -> list[dict]:
-    """Leave-by-hour transactions. No endpoint confirmed yet (#3 in the
-    mapping doc) - raises until one is."""
-    raise NotImplementedError(
-        "ZenHR leave-by-hour endpoint is not confirmed yet - see docs/api-endpoint-mapping.md #3"
+def get_employee_active_professional_data(db: Session, branch_id: int, employee_id: int) -> dict | None:
+    try:
+        resp = _get(db, f"/api/v3/branches/{branch_id}/employees/{employee_id}/professional_data/active")
+    except httpx.HTTPStatusError as err:
+        if err.response.status_code == 404:
+            return None
+        raise
+    return resp.json()
+
+
+# ---------- Timeoff (vacation + leave, unified) ----------
+#
+# Confirmed: ZenHR doesn't split "vacation" and "leave" the way the original
+# spec assumed - both come from one timeoff_transactions endpoint, each row
+# referencing a TimeoffType (/timeoffs). class_name "AnnualVacation" is the
+# spec's "vacation"; everything else is the spec's "leave". Branch-level
+# bulk endpoint exists for transactions (no N+1 needed), each row already
+# includes "employee": {"id": ...}.
+
+
+def list_timeoff_types(db: Session, branch_id: int) -> list[dict]:
+    return _fetch_all_pages(db, f"/api/v3/branches/{branch_id}/timeoffs", {})
+
+
+def list_timeoff_transactions(db: Session, branch_id: int, date_from: str, date_to: str) -> list[dict]:
+    return _fetch_all_pages(
+        db,
+        f"/api/v3/branches/{branch_id}/timeoff_transactions",
+        {"filter[from_date][from]": date_from, "filter[to_date][to]": date_to},
     )
 
 
-def list_vacation_transactions(db: Session, branch_id: int, date_from: str, date_to: str) -> list[dict]:
-    """Vacation-by-day transactions. No endpoint confirmed yet (#4 in the
-    mapping doc) - raises until one is."""
-    raise NotImplementedError(
-        "ZenHR vacation-by-day endpoint is not confirmed yet - see docs/api-endpoint-mapping.md #4"
-    )
+# ---------- Shift assignment (per-employee working-day pattern) ----------
+#
+# Confirmed: two branch-level bulk endpoints, no N+1. list_branch_employee_
+# shifts gives {employee: {id}, work_shift: {id}, from_date, to_date} - which
+# work_shift covers which date range for which employee. list_work_shifts
+# gives each shift's own days_off - a list of ZenHR weekday strings, "0"
+# (Sunday) through "6" (Saturday), e.g. ["5", "6"] for a Fri/Sat weekend.
 
 
-def get_vacation_balance(db: Session, employee_id: int) -> float:
-    """Live vacation balance. No endpoint confirmed yet (#4 in the mapping
-    doc) - raises until one is."""
-    raise NotImplementedError(
-        "ZenHR vacation balance endpoint is not confirmed yet - see docs/api-endpoint-mapping.md #4"
-    )
+def list_branch_employee_shifts(db: Session, branch_id: int) -> list[dict]:
+    return _fetch_all_pages(db, f"/api/v3/branches/{branch_id}/employee_shifts", {})
 
 
-def get_shift_off_weekdays(db: Session, employee_id: int) -> list[int]:
-    """Per-employee working-day pattern (ISO weekday numbers that are off)
-    from the employee's ZenHR shift assignment. No endpoint confirmed yet
-    (#5 in the mapping doc) - raises until one is."""
-    raise NotImplementedError(
-        "ZenHR shift assignment endpoint is not confirmed yet - see docs/api-endpoint-mapping.md #5"
-    )
+def list_work_shifts(db: Session, branch_id: int) -> list[dict]:
+    return _fetch_all_pages(db, f"/api/v3/branches/{branch_id}/work_shifts", {})
+
+
+def zenhr_weekday_to_iso(zenhr_day: str | int) -> int:
+    """ZenHR: 0=Sunday..6=Saturday (Ruby Date#wday convention, confirmed by
+    a Fri/Sat weekend showing up as ["5","6"]). ISO weekday: 1=Monday..
+    7=Sunday. Only Sunday (0) actually moves; 1-6 (Mon-Sat) are identical
+    in both systems."""
+    day = int(zenhr_day)
+    return 7 if day == 0 else day

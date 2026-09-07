@@ -90,6 +90,7 @@ class Employee(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
 
     zenhr_employee_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    zenhr_branch_id: Mapped[int] = mapped_column(Integer, index=True, default=0)
     employment_number: Mapped[str] = mapped_column(String)
     display_name: Mapped[str] = mapped_column(String)
     first_name: Mapped[str] = mapped_column(String, default="")
@@ -118,9 +119,10 @@ class Employee(Base):
     bricks_user_id: Mapped[str | None] = mapped_column(String, nullable=True)
     bricks_display_name: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # ZenHR's API has no vacation-balance endpoint (confirmed - checked every
+    # endpoint in their published Postman collection), so this is purely
+    # admin-maintained, not synced from anywhere.
     vacation_balance_days: Mapped[float | None] = mapped_column(Float, nullable=True)
-    vacation_balance_override_days: Mapped[float | None] = mapped_column(Float, nullable=True)
-    vacation_balance_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
@@ -165,54 +167,46 @@ class AttendanceRecord(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
-# ---------- Leave (by hour) ----------
+# ---------- Timeoff (ZenHR's single unified vacation/leave concept) ----------
+#
+# ZenHR doesn't split "vacation" and "leave" into separate endpoints the way
+# the original spec described - both live in one timeoff_transactions
+# endpoint, each referencing a TimeoffType (e.g. "Annual Vacation", a sick
+# leave type, etc. - class_name AnnualVacation marks the vacation ones).
 
 
-class LeaveTransaction(Base):
-    """A ZenHR leave-by-hour transaction. `leave_type` stays a free string
-    (not an enum) so new transaction types ZenHR adds don't need a schema
-    change - see docs/api-endpoint-mapping.md, this endpoint is unconfirmed."""
+class TimeoffType(Base):
+    """Synced from ZenHR's /timeoffs endpoint. class_name "AnnualVacation"
+    is what the spec's "vacation-by-day" refers to; everything else is the
+    spec's "leave" concept."""
 
-    __tablename__ = "leave_transactions"
+    __tablename__ = "timeoff_types"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
-    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), index=True)
-    zenhr_transaction_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
-
-    leave_date: Mapped[date] = mapped_column(Date, index=True)
-    hours: Mapped[float] = mapped_column(Float)
-    leave_type: Mapped[str] = mapped_column(String)
-    status: Mapped[str] = mapped_column(String)
-    note: Mapped[str | None] = mapped_column(String, nullable=True)
-
-    synced_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # ZenHR's own id
+    name: Mapped[str] = mapped_column(String)
+    class_name: Mapped[str] = mapped_column(String)
+    is_sick_vacation: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
-# ---------- Vacation (by day) ----------
+# Statuses that count as a protected day off (don't count as absence).
+# UNCONFIRMED exact spelling ZenHR uses - see docs/api-endpoint-mapping.md.
+PROTECTED_TIMEOFF_STATUSES = {"approved", "added_by_hr", "added by hr"}
 
 
-class VacationStatus(str, enum.Enum):
-    APPROVED = "Approved"
-    ADDED_BY_HR = "Added by HR"
-    PENDING = "Pending"
-    WITHDRAWN = "Withdrawn"
-    REJECTED = "Rejected"
-
-
-PROTECTED_VACATION_STATUSES = {VacationStatus.APPROVED, VacationStatus.ADDED_BY_HR}
-
-
-class VacationTransaction(Base):
-    __tablename__ = "vacation_transactions"
+class TimeoffTransaction(Base):
+    __tablename__ = "timeoff_transactions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
     employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), index=True)
-    zenhr_transaction_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    zenhr_transaction_id: Mapped[int] = mapped_column(Integer, unique=True)
+    timeoff_type_id: Mapped[int | None] = mapped_column(ForeignKey("timeoff_types.id"), nullable=True)
+    timeoff_type: Mapped["TimeoffType | None"] = relationship()
 
-    vacation_date: Mapped[date] = mapped_column(Date, index=True)
+    from_date: Mapped[date] = mapped_column(Date, index=True)
+    to_date: Mapped[date] = mapped_column(Date)
+    amount: Mapped[float] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String)
-    vacation_type: Mapped[str | None] = mapped_column(String, nullable=True)
-    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
 
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 

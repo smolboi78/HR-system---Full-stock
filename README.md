@@ -18,11 +18,14 @@ rules, ZenHR↔Bricks name overrides, user management, new-hire confirmation), a
 downloadable reports (PDF/Excel, per-employee and joint) are built and verified
 locally against seeded demo data.
 
-**Not yet live**: the ZenHR/Bricks sync. Employee list and the attendance-records
-endpoint are carried over from an earlier build (job title field name is an
-educated guess); leave-by-hour, vacation-by-day/balances, and per-employee shift
-patterns have no confirmed ZenHR endpoint yet. See `docs/api-endpoint-mapping.md`
-for exactly what's confirmed vs. still needed before the sync can run for real.
+**Not yet run against real data**: the ZenHR/Bricks sync itself. All endpoints
+are now confirmed against ZenHR's own published Postman collection and
+Bricks' OpenAPI spec (see `docs/api-endpoint-mapping.md`) - vacation balance
+turned out to have no live-syncable source at all (no such ZenHR endpoint
+exists), so it's admin-maintained by design, not a gap. What's left is
+completing the ZenHR OAuth connect flow once and running a real sync to
+shake out anything the sample data in the docs didn't cover (exact status
+string spellings, mainly).
 
 ## Local development
 
@@ -71,9 +74,12 @@ actually deployed somewhere with normal internet access — see **Deploying
    `POST /api/sync/cron` (with `Authorization: Bearer $SYNC_CRON_SECRET`) on
    whatever cron your host provides.
 
-This will surface errors immediately for the two unconfirmed ZenHR endpoints
-(leave-by-hour, vacation-by-day/balances) and the shift-pattern endpoint, which
-currently raise `NotImplementedError` — see `docs/api-endpoint-mapping.md`.
+First sync pulls employees, then their professional data (job title/
+department/manager - one API call per employee, so this step is the slow
+one for a large org), attendance, shift assignments, timeoff transactions,
+and finally Bricks visits. See `docs/api-endpoint-mapping.md` for what each
+step reads and the couple of things still unconfirmed (exact status-string
+spellings).
 
 ## Deploying (Railway)
 

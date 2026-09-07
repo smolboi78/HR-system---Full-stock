@@ -9,7 +9,9 @@ import { lastNDays, type Period } from "../lib/period";
 import { CATEGORY_LABEL } from "../lib/category";
 import { useAuth } from "../context/AuthContext";
 
-type Tab = "attendance" | "leave" | "vacation" | "visits";
+type Tab = "attendance" | "timeoff" | "visits";
+
+const TAB_LABEL: Record<Tab, string> = { attendance: "Attendance", timeoff: "Time off", visits: "Visits" };
 
 function StatTile({ label, value }: { label: string; value: string | number }) {
   return (
@@ -34,7 +36,7 @@ export default function Profile() {
   const { user } = useAuth();
   const [period, setPeriod] = useState<Period>(lastNDays(30));
   const [tab, setTab] = useState<Tab>("attendance");
-  const [overrideDraft, setOverrideDraft] = useState("");
+  const [balanceDraft, setBalanceDraft] = useState("");
 
   const { data: profile, isLoading, error, refetch } = useQuery({
     queryKey: ["employee", id, period.start, period.end],
@@ -43,10 +45,10 @@ export default function Profile() {
     enabled: !!id,
   });
 
-  async function saveOverride() {
+  async function saveBalance() {
     if (!id) return;
-    const value = overrideDraft.trim() === "" ? null : Number(overrideDraft);
-    await api.put(`/employees/${id}/vacation-override`, { override_days: value });
+    const value = balanceDraft.trim() === "" ? null : Number(balanceDraft);
+    await api.put(`/employees/${id}/vacation-balance`, { balance_days: value });
     refetch();
   }
 
@@ -103,26 +105,22 @@ export default function Profile() {
         <div>
           <div className="text-sm text-muted">Vacation balance</div>
           <div className="text-2xl font-semibold tracking-tight mt-1">
-            {profile.vacation_balance_effective_days ?? "—"} <span className="text-sm font-normal text-muted">days</span>
+            {profile.vacation_balance_days ?? "—"} <span className="text-sm font-normal text-muted">days</span>
           </div>
-          {profile.vacation_balance_override_days != null && (
-            <div className="text-xs text-amber-700 mt-1">
-              Manually overridden (ZenHR reports {profile.vacation_balance_days ?? "—"})
-            </div>
-          )}
+          <div className="text-xs text-muted mt-1">Maintained manually - ZenHR has no live balance to sync from.</div>
         </div>
         {user?.role === "ADMIN" && (
           <div className="flex items-center gap-2">
             <input
               type="number"
               step="0.5"
-              placeholder="Override days"
-              value={overrideDraft}
-              onChange={(e) => setOverrideDraft(e.target.value)}
+              placeholder="Balance days"
+              value={balanceDraft}
+              onChange={(e) => setBalanceDraft(e.target.value)}
               className="w-32 text-sm border border-line rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-accent/30"
             />
             <button
-              onClick={saveOverride}
+              onClick={saveBalance}
               className="text-sm bg-ink text-paper rounded-lg px-3 py-1.5 hover:opacity-90 transition-opacity"
             >
               Save
@@ -133,15 +131,15 @@ export default function Profile() {
 
       <div>
         <div className="flex items-center gap-1 border-b border-line">
-          {(["attendance", "leave", "vacation", "visits"] as Tab[]).map((t) => (
+          {(["attendance", "timeoff", "visits"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-4 py-2.5 text-sm capitalize -mb-px border-b-2 transition-colors ${
+              className={`px-4 py-2.5 text-sm -mb-px border-b-2 transition-colors ${
                 tab === t ? "border-ink text-ink font-medium" : "border-transparent text-muted hover:text-ink"
               }`}
             >
-              {t}
+              {TAB_LABEL[t]}
             </button>
           ))}
         </div>
@@ -161,20 +159,18 @@ export default function Profile() {
               ]}
             />
           )}
-          {tab === "leave" && (
+          {tab === "timeoff" && (
             <Table
-              rows={profile.leave}
-              empty="No leave transactions in this period."
-              columns={["Date", "Type", "Hours", "Status"]}
-              render={(r) => [fmtDate(r.leave_date), r.leave_type.replace(/_/g, " "), r.hours, r.status]}
-            />
-          )}
-          {tab === "vacation" && (
-            <Table
-              rows={profile.vacation}
-              empty="No vacation transactions in this period."
-              columns={["Date", "Type", "Status"]}
-              render={(r) => [fmtDate(r.vacation_date), r.vacation_type ?? "—", r.status]}
+              rows={profile.timeoff}
+              empty="No leave or vacation transactions in this period."
+              columns={["From", "To", "Type", "Amount", "Status"]}
+              render={(r) => [
+                fmtDate(r.from_date),
+                fmtDate(r.to_date),
+                r.type_name ?? (r.is_vacation ? "Vacation" : "Leave"),
+                r.amount,
+                r.status.replace(/_/g, " "),
+              ]}
             />
           )}
           {tab === "visits" && (
