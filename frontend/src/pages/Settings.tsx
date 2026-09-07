@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { api, downloadUrl } from "../api/client";
 import type {
   CategoryRule,
   EmployeeCard,
@@ -337,13 +337,25 @@ function SyncSection() {
 
   return (
     <Section title="Data sync" description="Pulls the trailing 10-day window from ZenHR and Bricks. Runs on a schedule; you can also trigger it manually.">
-      <button
-        onClick={() => runSync.mutate()}
-        disabled={runSync.isPending}
-        className="text-sm bg-ink text-paper rounded-lg px-3 py-1.5 disabled:opacity-40"
-      >
-        {runSync.isPending ? "Syncing…" : "Sync now"}
-      </button>
+      <div className="flex items-center gap-2">
+        <a
+          href={downloadUrl("/sync/zenhr/connect")}
+          className="text-sm border border-line rounded-lg px-3 py-1.5 hover:border-ink/30 transition-colors"
+        >
+          Connect ZenHR
+        </a>
+        <button
+          onClick={() => runSync.mutate()}
+          disabled={runSync.isPending}
+          className="text-sm bg-ink text-paper rounded-lg px-3 py-1.5 disabled:opacity-40"
+        >
+          {runSync.isPending ? "Syncing…" : "Sync now"}
+        </button>
+      </div>
+      <p className="text-xs text-muted">
+        "Connect ZenHR" is a one-time step — it takes you to ZenHR to approve access, then brings you back here.
+        Do this once (or again if the connection is ever revoked) before using "Sync now".
+      </p>
       {runSync.isError && <p className="text-sm text-red-600">Sync failed — see the run log below.</p>}
       <div className="max-h-64 overflow-y-auto divide-y divide-line/70">
         {runs?.map((r) => (
@@ -365,6 +377,26 @@ function SyncSection() {
   );
 }
 
+function ZenhrConnectBanner() {
+  const params = new URLSearchParams(window.location.search);
+  const zenhr = params.get("zenhr");
+  if (!zenhr) return null;
+
+  if (zenhr === "connected") {
+    return (
+      <div className="text-sm bg-green-50 border border-green-200 text-green-800 rounded-lg px-4 py-3">
+        ZenHR connected. Use "Sync now" below to pull data.
+      </div>
+    );
+  }
+  return (
+    <div className="text-sm bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-3">
+      Couldn't connect ZenHR ({params.get("reason") ?? "unknown error"}). Double-check the client ID/secret and
+      redirect URI, then try "Connect ZenHR" again.
+    </div>
+  );
+}
+
 export default function Settings() {
   return (
     <div className="space-y-6 max-w-2xl">
@@ -372,6 +404,7 @@ export default function Settings() {
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-muted text-sm mt-1">Admin only.</p>
       </div>
+      <ZenhrConnectBanner />
       <NewHiresSection />
       <SyncSection />
       <HolidaysSection />

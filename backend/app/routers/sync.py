@@ -25,12 +25,20 @@ def zenhr_connect(_: User = Depends(require_admin)) -> RedirectResponse:
 
 
 @router.get("/zenhr/callback")
-def zenhr_callback(code: str, state: str, db: Session = Depends(get_db)) -> dict:
+def zenhr_callback(code: str, state: str, db: Session = Depends(get_db)) -> RedirectResponse:
+    settings = get_settings()
+    settings_url = f"{settings.frontend_origin}/settings"
+
     if state not in _oauth_states:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired OAuth state")
+        return RedirectResponse(f"{settings_url}?zenhr=error&reason=invalid_state")
     _oauth_states.discard(state)
-    zenhr_client.exchange_code_for_token(db, code)
-    return {"ok": True, "message": "ZenHR connected."}
+
+    try:
+        zenhr_client.exchange_code_for_token(db, code)
+    except Exception as err:  # noqa: BLE001 - surfaced to the admin via the redirect, not swallowed
+        return RedirectResponse(f"{settings_url}?zenhr=error&reason={type(err).__name__}")
+
+    return RedirectResponse(f"{settings_url}?zenhr=connected")
 
 
 @router.post("/run", response_model=list[SyncRunOut])

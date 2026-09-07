@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db import get_db
 from app.deps import COOKIE_NAME, get_current_user
 from app.models import User
@@ -19,14 +20,15 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     if not user or not user.active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
 
+    settings = get_settings()
     token = create_access_token(user.id)
     response.set_cookie(
         COOKIE_NAME,
         token,
         max_age=COOKIE_MAX_AGE_SECONDS,
         httponly=True,
-        samesite="lax",
-        secure=False,  # flip to True once served over HTTPS in production
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_secure,
     )
     return user
 

@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,9 +21,28 @@ class Settings(BaseSettings):
 
     frontend_origin: str = "http://localhost:5173"
 
+    # Cookie flags for the auth session cookie. Local dev over plain HTTP
+    # needs secure=False; a real deploy with the frontend on a different
+    # origin (e.g. Vercel) needs secure=True + samesite=none for the
+    # cross-site cookie to actually be sent.
+    cookie_secure: bool = False
+    cookie_samesite: str = "lax"
+
     seed_admin_email: str = "admin@example.com"
     seed_admin_password: str = "change-me"
     seed_admin_name: str = "Admin"
+
+    @field_validator("database_url")
+    @classmethod
+    def _normalize_database_url(cls, v: str) -> str:
+        # Railway/Render/Heroku-style Postgres addons hand out
+        # "postgres://" or plain "postgresql://" - SQLAlchemy needs the
+        # psycopg3 driver spelled out explicitly.
+        if v.startswith("postgres://"):
+            v = "postgresql://" + v[len("postgres://") :]
+        if v.startswith("postgresql://"):
+            v = "postgresql+psycopg://" + v[len("postgresql://") :]
+        return v
 
 
 @lru_cache
