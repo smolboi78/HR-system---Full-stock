@@ -6,6 +6,7 @@ import Directory from "./pages/Directory";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import Reports from "./pages/Reports";
+import Account from "./pages/Account";
 
 function ProtectedLayout() {
   const { user, loading } = useAuth();
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="/employees/:id" element={<Profile />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/account" element={<Account />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

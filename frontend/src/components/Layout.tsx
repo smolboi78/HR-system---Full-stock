@@ -47,10 +47,10 @@ export default function Layout() {
             </nav>
           </div>
           <div className="flex items-center gap-4">
-            <div className="text-sm text-right">
+            <Link to="/account" className="text-sm text-right hover:opacity-70 transition-opacity">
               <div className="font-medium">{user?.name}</div>
               <div className="text-xs text-muted">{user?.role === "ADMIN" ? "Admin" : "View only"}</div>
-            </div>
+            </Link>
             <button
               onClick={() => logout()}
               className="text-sm text-muted hover:text-ink px-3 py-1.5 rounded-md hover:bg-black/5 transition-colors"
