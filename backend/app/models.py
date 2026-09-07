@@ -1,0 +1,277 @@
+import enum
+from datetime import date, datetime
+
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db import Base
+
+
+def _now() -> datetime:
+    return datetime.utcnow()
+
+
+# ---------- Auth ----------
+
+
+class UserRole(str, enum.Enum):
+    ADMIN = "ADMIN"
+    VIEWER = "VIEWER"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    email: Mapped[str] = mapped_column(String, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    role: Mapped[UserRole] = mapped_column(String, default=UserRole.VIEWER)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+# ---------- Employee categorization ----------
+
+
+class EmployeeCategory(str, enum.Enum):
+    MANAGEMENT = "MANAGEMENT"
+    SALES = "SALES"
+    COLLECTOR = "COLLECTOR"
+    DELIVERY_AGENT = "DELIVERY_AGENT"
+    SALES_SUPPORT = "SALES_SUPPORT"
+    EXCLUDED = "EXCLUDED"
+    UNASSIGNED = "UNASSIGNED"
+
+
+class OnboardingStatus(str, enum.Enum):
+    PENDING_CONFIRMATION = "PENDING_CONFIRMATION"
+    ACTIVE = "ACTIVE"
+
+
+class JobRoleCategoryRule(Base):
+    """Maps a ZenHR job title/department string to a dashboard category,
+    used to auto-assign new employees' metric type."""
+
+    __tablename__ = "job_role_category_rules"
+
+    job_role: Mapped[str] = mapped_column(String, primary_key=True)
+    category: Mapped[EmployeeCategory] = mapped_column(String)
+
+
+# ---------- Employees ----------
+
+
+class Employee(Base):
+    __tablename__ = "employees"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+
+    zenhr_employee_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    employment_number: Mapped[str] = mapped_column(String)
+    display_name: Mapped[str] = mapped_column(String)
+    first_name: Mapped[str] = mapped_column(String, default="")
+    last_name: Mapped[str] = mapped_column(String, default="")
+    photo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    job_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    department: Mapped[str | None] = mapped_column(String, nullable=True)
+    category: Mapped[EmployeeCategory] = mapped_column(String, default=EmployeeCategory.UNASSIGNED)
+    onboarding_status: Mapped[OnboardingStatus] = mapped_column(
+        String, default=OnboardingStatus.PENDING_CONFIRMATION
+    )
+
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    hiring_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    termination_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # Working-day pattern pulled from the employee's ZenHR shift assignment:
+    # ISO weekday numbers (1=Mon..7=Sun) that are NOT working days for them.
+    off_weekdays: Mapped[list[int]] = mapped_column(__import__("sqlalchemy").JSON, default=list)
+
+    # Bricks linkage - resolved automatically by owner_id once matched, or
+    # pinned via a manual EmployeeNameOverride for known name mismatches.
+    bricks_user_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    bricks_display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    vacation_balance_days: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vacation_balance_override_days: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vacation_balance_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+class EmployeeNameOverride(Base):
+    """Manual ZenHR<->Bricks name-mapping override for employees whose
+    Bricks display name doesn't match their ZenHR name."""
+
+    __tablename__ = "employee_name_overrides"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    employment_number: Mapped[str] = mapped_column(String, unique=True)
+    bricks_display_name: Mapped[str] = mapped_column(String)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+# ---------- Attendance (ZenHR accumulative attendance report) ----------
+
+
+class AttendanceRecord(Base):
+    __tablename__ = "attendance_records"
+    __table_args__ = (UniqueConstraint("employee_id", "attendance_date", name="uq_attendance_employee_date"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), index=True)
+    employee: Mapped["Employee"] = relationship()
+
+    attendance_date: Mapped[date] = mapped_column(Date, index=True)
+    entry_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    exit_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    worked_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # e.g. "present", "absent", "business_mission", "personal_excuse",
+    # "uncompleted_shift", "unpaid_leave" - kept as a free string so new
+    # ZenHR absence reasons don't require a migration.
+    status: Mapped[str] = mapped_column(String)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+# ---------- Leave (by hour) ----------
+
+
+class LeaveTransaction(Base):
+    """A ZenHR leave-by-hour transaction. `leave_type` stays a free string
+    (not an enum) so new transaction types ZenHR adds don't need a schema
+    change - see docs/api-endpoint-mapping.md, this endpoint is unconfirmed."""
+
+    __tablename__ = "leave_transactions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), index=True)
+    zenhr_transaction_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+
+    leave_date: Mapped[date] = mapped_column(Date, index=True)
+    hours: Mapped[float] = mapped_column(Float)
+    leave_type: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+# ---------- Vacation (by day) ----------
+
+
+class VacationStatus(str, enum.Enum):
+    APPROVED = "Approved"
+    ADDED_BY_HR = "Added by HR"
+    PENDING = "Pending"
+    WITHDRAWN = "Withdrawn"
+    REJECTED = "Rejected"
+
+
+PROTECTED_VACATION_STATUSES = {VacationStatus.APPROVED, VacationStatus.ADDED_BY_HR}
+
+
+class VacationTransaction(Base):
+    __tablename__ = "vacation_transactions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id"), index=True)
+    zenhr_transaction_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+
+    vacation_date: Mapped[date] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String)
+    vacation_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+# ---------- Visits (Bricks) ----------
+
+
+class Visit(Base):
+    __tablename__ = "visits"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    bricks_visit_id: Mapped[str] = mapped_column(String, unique=True)
+    employee_id: Mapped[str | None] = mapped_column(ForeignKey("employees.id"), nullable=True, index=True)
+
+    owner_bricks_id: Mapped[str] = mapped_column(String, index=True)
+    owner_name_raw: Mapped[str] = mapped_column(String)
+    contact_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_name: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    is_successful: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    is_planned: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String)
+    visit_time: Mapped[datetime] = mapped_column(DateTime, index=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+# ---------- Holidays (Egypt, editable in settings) ----------
+
+
+class Holiday(Base):
+    __tablename__ = "holidays"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    holiday_date: Mapped[date] = mapped_column(Date, unique=True)
+    name: Mapped[str] = mapped_column(String)
+
+
+# ---------- Sync bookkeeping ----------
+
+
+class SyncSource(str, enum.Enum):
+    ZENHR = "ZENHR"
+    BRICKS = "BRICKS"
+
+
+class SyncStatus(str, enum.Enum):
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+
+
+class SyncRun(Base):
+    __tablename__ = "sync_runs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+    source: Mapped[SyncSource] = mapped_column(String)
+    status: Mapped[SyncStatus] = mapped_column(String, default=SyncStatus.RUNNING)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    records_synced: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ZenhrOAuthToken(Base):
+    """Single-row table holding the current ZenHR OAuth tokens."""
+
+    __tablename__ = "zenhr_oauth_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default="default")
+    access_token: Mapped[str] = mapped_column(String)
+    refresh_token: Mapped[str] = mapped_column(String)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    scope: Mapped[str] = mapped_column(String, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
