@@ -3,10 +3,12 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import require_admin
-from app.models import EmployeeNameOverride, Holiday, JobRoleCategoryRule, User
+from app.models import DepartmentCategoryRule, EmployeeNameOverride, Holiday, JobRoleCategoryRule, User
 from app.schemas import (
     CategoryRuleOut,
     CategoryRuleRequest,
+    DepartmentRuleOut,
+    DepartmentRuleRequest,
     HolidayCreateRequest,
     HolidayOut,
     NameOverrideOut,
@@ -81,6 +83,39 @@ def upsert_category_rule(
 @router.delete("/category-rules/{job_role}")
 def delete_category_rule(job_role: str, db: Session = Depends(get_db), _: User = Depends(require_admin)) -> dict:
     rule = db.get(JobRoleCategoryRule, job_role)
+    if not rule:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Rule not found")
+    db.delete(rule)
+    db.commit()
+    return {"ok": True}
+
+
+# ---------- Department -> category rules ----------
+
+
+@router.get("/department-rules", response_model=list[DepartmentRuleOut])
+def list_department_rules(db: Session = Depends(get_db), _: User = Depends(require_admin)) -> list[DepartmentCategoryRule]:
+    return db.query(DepartmentCategoryRule).order_by(DepartmentCategoryRule.department).all()
+
+
+@router.put("/department-rules", response_model=DepartmentRuleOut)
+def upsert_department_rule(
+    payload: DepartmentRuleRequest, db: Session = Depends(get_db), _: User = Depends(require_admin)
+) -> DepartmentCategoryRule:
+    rule = db.get(DepartmentCategoryRule, payload.department)
+    if rule:
+        rule.category = payload.category
+    else:
+        rule = DepartmentCategoryRule(department=payload.department, category=payload.category)
+        db.add(rule)
+    db.commit()
+    db.refresh(rule)
+    return rule
+
+
+@router.delete("/department-rules/{department}")
+def delete_department_rule(department: str, db: Session = Depends(get_db), _: User = Depends(require_admin)) -> dict:
+    rule = db.get(DepartmentCategoryRule, department)
     if not rule:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Rule not found")
     db.delete(rule)

@@ -20,17 +20,25 @@ verification) before that code gets written.
 ## 1. Employee list — ASSUMED, partially confirmed
 
 `GET /api/v3/branches/{branch_id}/employees` (paginated), per
-`src/lib/zenhr.ts`.
+`backend/app/services/zenhr_client.py` (rebuilt on the Python/FastAPI stack;
+the field-name guesses below carried over from the original Next.js attempt
+since neither was ever validated against a real response).
 
-- Confirmed shape (from prior build): `id`, `branch_id`, `employment_number`,
-  `active`, `hiring_date`, `termination_date`, `user.name.en.{first_name,last_name}`.
-- **Unconfirmed: the job title / department field.** `extractJobRole()` tries
-  three candidate field names (`job_title`, `position`, `job_position`) because
-  the real one was never seen. This blocks auto-assigning metric type
-  (Management / Sales & Collector / Delivery Agent) from job title, which the
-  spec requires.
-- Not yet modeled: department (spec says title *or* department can drive
-  metric type), photo/avatar URL if ZenHR exposes one for the directory card.
+- Confirmed shape: `id`, `branch_id`, `employment_number`, `active`,
+  `hiring_date`, `termination_date`, `user.name.en.{first_name,last_name}`.
+- **Unconfirmed: job title, department, and direct manager fields.**
+  `extract_job_role()` / `extract_department()` / `extract_manager()` each
+  try several candidate field names because none has been seen in a real
+  response:
+  - job title: `job_title`, `position`, `job_position`
+  - department: `department`, `department_name`, `division`
+  - manager: `direct_manager`, `manager`, `line_manager`, `reports_to`
+  This blocks auto-assigning metric type from job title/department (now
+  department-first, job-title-fallback - see `DepartmentCategoryRule` /
+  `JobRoleCategoryRule`) and showing the correct manager name until
+  confirmed.
+- Not yet modeled: photo/avatar URL if ZenHR exposes one for the directory
+  card.
 
 ## 2. Accumulative attendance report — NEEDS RE-CHECK
 

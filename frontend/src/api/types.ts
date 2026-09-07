@@ -20,6 +20,7 @@ export interface EmployeeCard {
   display_name: string;
   job_title: string | null;
   department: string | null;
+  manager_name: string | null;
   category: EmployeeCategory;
   photo_url: string | null;
   active: boolean;
@@ -67,6 +68,7 @@ export interface EmployeeProfile {
   display_name: string;
   job_title: string | null;
   department: string | null;
+  manager_name: string | null;
   category: EmployeeCategory;
   photo_url: string | null;
   active: boolean;
@@ -98,6 +100,11 @@ export interface Holiday {
 
 export interface CategoryRule {
   job_role: string;
+  category: EmployeeCategory;
+}
+
+export interface DepartmentRule {
+  department: string;
   category: EmployeeCategory;
 }
 

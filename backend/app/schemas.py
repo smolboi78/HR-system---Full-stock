@@ -50,6 +50,7 @@ class EmployeeCardOut(BaseModel):
     display_name: str
     job_title: str | None
     department: str | None
+    manager_name: str | None = None
     category: str
     photo_url: str | None
     active: bool
@@ -105,6 +106,7 @@ class EmployeeProfileOut(BaseModel):
     display_name: str
     job_title: str | None
     department: str | None
+    manager_name: str | None
     category: str
     photo_url: str | None
     active: bool
@@ -161,6 +163,18 @@ class CategoryRuleOut(BaseModel):
 
 class CategoryRuleRequest(BaseModel):
     job_role: str
+    category: str
+
+
+class DepartmentRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    department: str
+    category: str
+
+
+class DepartmentRuleRequest(BaseModel):
+    department: str
     category: str
 
 

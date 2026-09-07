@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     AttendanceRecord,
+    DepartmentCategoryRule,
     Employee,
     EmployeeCategory,
     EmployeeNameOverride,
@@ -48,16 +49,26 @@ def _display_name(emp: dict) -> tuple[str, str, str]:
 def sync_employees(db: Session) -> SyncRun:
     def _do() -> int:
         overrides = {o.employment_number: o.bricks_display_name for o in db.query(EmployeeNameOverride).all()}
+        category_by_department = {r.department: r.category for r in db.query(DepartmentCategoryRule).all()}
         category_by_role = {r.job_role: r.category for r in db.query(JobRoleCategoryRule).all()}
 
         count = 0
+        managers_to_resolve: list[tuple[Employee, int]] = []
         branches = zenhr_client.list_branches(db)
         for branch in branches:
             for emp in zenhr_client.list_employees(db, branch["id"]):
                 first, last, display = _display_name(emp)
                 employment_number = str(emp["employment_number"])
                 job_role = zenhr_client.extract_job_role(emp)
-                category = category_by_role.get(job_role) if job_role else None
+                department = zenhr_client.extract_department(emp)
+                manager_name, manager_id = zenhr_client.extract_manager(emp)
+
+                # Department is the more reliable categorization signal
+                # when both are known - see DepartmentCategoryRule.
+                category = (
+                    (department and category_by_department.get(department))
+                    or (job_role and category_by_role.get(job_role))
+                )
 
                 existing = db.query(Employee).filter_by(zenhr_employee_id=emp["id"]).first()
                 is_new = existing is None
@@ -71,21 +82,35 @@ def sync_employees(db: Session) -> SyncRun:
                 employee.hiring_date = emp.get("hiring_date")
                 employee.termination_date = emp.get("termination_date")
                 employee.job_title = job_role
+                employee.department = department
+                employee.manager_name = manager_name
+                employee.manager_zenhr_id = manager_id
+                if manager_id and not manager_name:
+                    managers_to_resolve.append((employee, manager_id))
                 if is_new:
                     employee.category = category or EmployeeCategory.UNASSIGNED
                     employee.onboarding_status = OnboardingStatus.PENDING_CONFIRMATION
                     employee.bricks_display_name = overrides.get(employment_number, display)
                 elif employment_number in overrides:
                     employee.bricks_display_name = overrides[employment_number]
-                # Known job role now maps to a category and the employee
-                # hasn't been through new-hire confirmation yet: apply it,
-                # but never silently overwrite a human's confirmed choice.
+                # Known department/job role now maps to a category and the
+                # employee hasn't been through new-hire confirmation yet:
+                # apply it, but never silently overwrite a human's choice.
                 if category and employee.onboarding_status == OnboardingStatus.PENDING_CONFIRMATION:
                     employee.category = category
 
                 if is_new:
                     db.add(employee)
                 count += 1
+
+        db.flush()
+        # Manager field only gave us an id, not a name (e.g. a bare
+        # reports_to id) - look the name up from what we just synced.
+        for employee, manager_id in managers_to_resolve:
+            manager = db.query(Employee).filter_by(zenhr_employee_id=manager_id).first()
+            if manager:
+                employee.manager_name = manager.display_name
+
         db.commit()
         return count
 

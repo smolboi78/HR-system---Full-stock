@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, authedUrl } from "../api/client";
 import type {
   CategoryRule,
+  DepartmentRule,
   EmployeeCard,
   Holiday,
   NameOverride,
@@ -168,7 +169,10 @@ function CategoryRulesSection() {
   });
 
   return (
-    <Section title="Job title → category rules" description="Auto-assigns a new employee's metric type from their ZenHR job title.">
+    <Section
+      title="Job title → category rules"
+      description="Auto-assigns a new employee's metric type from their ZenHR job title. Used as a fallback when no department rule matches."
+    >
       <div className="flex items-center gap-2">
         <input
           placeholder="Job title (exact match)"
@@ -194,6 +198,63 @@ function CategoryRulesSection() {
               {r.job_role} → {CATEGORY_LABEL[r.category]}
             </span>
             <button onClick={() => remove.mutate(r.job_role)} className="text-xs text-muted hover:text-red-600">
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function DepartmentRulesSection() {
+  const qc = useQueryClient();
+  const { data: rules } = useQuery({ queryKey: ["department-rules"], queryFn: () => api.get<DepartmentRule[]>("/settings/department-rules") });
+  const [department, setDepartment] = useState("");
+  const [category, setCategory] = useState<string>("MANAGEMENT");
+
+  const upsert = useMutation({
+    mutationFn: () => api.put("/settings/department-rules", { department, category }),
+    onSuccess: () => {
+      setDepartment("");
+      qc.invalidateQueries({ queryKey: ["department-rules"] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (dept: string) => api.delete(`/settings/department-rules/${encodeURIComponent(dept)}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["department-rules"] }),
+  });
+
+  return (
+    <Section
+      title="Department → category rules"
+      description="Auto-assigns a new employee's metric type from their ZenHR department - checked before job title rules."
+    >
+      <div className="flex items-center gap-2">
+        <input
+          placeholder="Department (exact match)"
+          value={department}
+          onChange={(e) => setDepartment(e.target.value)}
+          className="text-sm border border-line rounded-lg px-2 py-1.5 flex-1"
+        />
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="text-sm border border-line rounded-lg px-2 py-1.5">
+          {CATEGORY_OPTIONS.map((c) => (
+            <option key={c} value={c}>
+              {CATEGORY_LABEL[c]}
+            </option>
+          ))}
+        </select>
+        <button disabled={!department} onClick={() => upsert.mutate()} className="text-sm bg-ink text-paper rounded-lg px-3 py-1.5 disabled:opacity-40">
+          Save
+        </button>
+      </div>
+      <div className="max-h-64 overflow-y-auto divide-y divide-line/70">
+        {rules?.map((r) => (
+          <div key={r.department} className="flex items-center justify-between py-2 text-sm">
+            <span>
+              {r.department} → {CATEGORY_LABEL[r.category]}
+            </span>
+            <button onClick={() => remove.mutate(r.department)} className="text-xs text-muted hover:text-red-600">
               Remove
             </button>
           </div>
@@ -408,6 +469,7 @@ export default function Settings() {
       <NewHiresSection />
       <SyncSection />
       <HolidaysSection />
+      <DepartmentRulesSection />
       <CategoryRulesSection />
       <NameOverridesSection />
       <UsersSection />

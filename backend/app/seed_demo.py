@@ -19,15 +19,15 @@ from app.models import (
 )
 
 DEMO_EMPLOYEES = [
-    {"name": "Mona Ibrahim", "title": "Branch Manager", "category": EmployeeCategory.MANAGEMENT},
-    {"name": "Tarek Hassan", "title": "Operations Manager", "category": EmployeeCategory.MANAGEMENT},
-    {"name": "Youssef Adel", "title": "Sales Representative", "category": EmployeeCategory.SALES},
-    {"name": "Karim Ahmed", "title": "Sales Representative", "category": EmployeeCategory.SALES},
-    {"name": "Nour Fathy", "title": "Collector", "category": EmployeeCategory.COLLECTOR},
-    {"name": "Ahmed Sales-Support", "title": "Sales Support", "category": EmployeeCategory.SALES_SUPPORT},
-    {"name": "Sherif Naguib", "title": "Delivery Agent", "category": EmployeeCategory.DELIVERY_AGENT},
-    {"name": "Dina Mostafa", "title": "Delivery Agent", "category": EmployeeCategory.DELIVERY_AGENT},
-    {"name": "Hana Reda", "title": "Sales Representative", "category": EmployeeCategory.UNASSIGNED},
+    {"name": "Mona Ibrahim", "title": "Branch Manager", "department": "Operations", "manager": None, "category": EmployeeCategory.MANAGEMENT},
+    {"name": "Tarek Hassan", "title": "Operations Manager", "department": "Operations", "manager": "Mona Ibrahim", "category": EmployeeCategory.MANAGEMENT},
+    {"name": "Youssef Adel", "title": "Sales Representative", "department": "Sales", "manager": "Tarek Hassan", "category": EmployeeCategory.SALES},
+    {"name": "Karim Ahmed", "title": "Sales Representative", "department": "Sales", "manager": "Tarek Hassan", "category": EmployeeCategory.SALES},
+    {"name": "Nour Fathy", "title": "Collector", "department": "Finance", "manager": "Tarek Hassan", "category": EmployeeCategory.COLLECTOR},
+    {"name": "Ahmed Sales-Support", "title": "Sales Support", "department": "Sales", "manager": "Tarek Hassan", "category": EmployeeCategory.SALES_SUPPORT},
+    {"name": "Sherif Naguib", "title": "Delivery Agent", "department": "Logistics", "manager": "Mona Ibrahim", "category": EmployeeCategory.DELIVERY_AGENT},
+    {"name": "Dina Mostafa", "title": "Delivery Agent", "department": "Logistics", "manager": "Mona Ibrahim", "category": EmployeeCategory.DELIVERY_AGENT},
+    {"name": "Hana Reda", "title": "Sales Representative", "department": "Sales", "manager": "Tarek Hassan", "category": EmployeeCategory.UNASSIGNED},
 ]
 
 WEEKDAY_OFF = [5, 6]  # Friday, Saturday
@@ -47,6 +47,8 @@ def main() -> None:
                 first_name=spec["name"].split()[0],
                 last_name=" ".join(spec["name"].split()[1:]),
                 job_title=spec["title"],
+                department=spec["department"],
+                manager_name=spec["manager"],
                 category=spec["category"],
                 onboarding_status=OnboardingStatus.ACTIVE
                 if spec["category"] != EmployeeCategory.UNASSIGNED

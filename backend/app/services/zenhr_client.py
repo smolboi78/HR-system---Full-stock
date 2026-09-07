@@ -138,11 +138,8 @@ def list_employees(db: Session, branch_id: int) -> list[dict]:
 JOB_ROLE_FIELD_CANDIDATES = ("job_title", "position", "job_position")
 
 
-def extract_job_role(emp: dict) -> str | None:
-    """Tries every candidate field name seen in other ZenHR integrations.
-    UNCONFIRMED - update once a real employee response has been inspected;
-    see docs/api-endpoint-mapping.md #1."""
-    for field in JOB_ROLE_FIELD_CANDIDATES:
+def _extract_string_or_named(emp: dict, candidates: tuple[str, ...]) -> str | None:
+    for field in candidates:
         value = emp.get(field)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -151,6 +148,42 @@ def extract_job_role(emp: dict) -> str | None:
             if name:
                 return name.strip()
     return None
+
+
+def extract_job_role(emp: dict) -> str | None:
+    """Tries every candidate field name seen in other ZenHR integrations.
+    UNCONFIRMED - update once a real employee response has been inspected;
+    see docs/api-endpoint-mapping.md #1."""
+    return _extract_string_or_named(emp, JOB_ROLE_FIELD_CANDIDATES)
+
+
+DEPARTMENT_FIELD_CANDIDATES = ("department", "department_name", "division")
+
+
+def extract_department(emp: dict) -> str | None:
+    """UNCONFIRMED, same caveat as extract_job_role - see
+    docs/api-endpoint-mapping.md #1."""
+    return _extract_string_or_named(emp, DEPARTMENT_FIELD_CANDIDATES)
+
+
+MANAGER_FIELD_CANDIDATES = ("direct_manager", "manager", "line_manager", "reports_to")
+
+
+def extract_manager(emp: dict) -> tuple[str | None, int | None]:
+    """Returns (manager_name, manager_zenhr_employee_id). UNCONFIRMED, same
+    caveat as extract_job_role - see docs/api-endpoint-mapping.md #1."""
+    for field in MANAGER_FIELD_CANDIDATES:
+        value = emp.get(field)
+        if isinstance(value, dict):
+            manager_id = value.get("id")
+            name = _extract_string_or_named(value, ("name",)) or value.get("full_name")
+            if isinstance(name, dict):
+                name = (name.get("en") or {}).get("first_name")
+            if name or manager_id:
+                return (name.strip() if isinstance(name, str) else None), manager_id
+        elif isinstance(value, str) and value.strip():
+            return value.strip(), None
+    return None, None
 
 
 def list_attendance_records(db: Session, branch_id: int, date_from: str, date_to: str) -> list[dict]:

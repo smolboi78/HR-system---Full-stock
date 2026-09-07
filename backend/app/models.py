@@ -60,12 +60,24 @@ class OnboardingStatus(str, enum.Enum):
 
 
 class JobRoleCategoryRule(Base):
-    """Maps a ZenHR job title/department string to a dashboard category,
-    used to auto-assign new employees' metric type."""
+    """Maps a ZenHR job title string to a dashboard category, used to
+    auto-assign new employees' metric type. Checked as a fallback when no
+    DepartmentCategoryRule matches - see sync_employees()."""
 
     __tablename__ = "job_role_category_rules"
 
     job_role: Mapped[str] = mapped_column(String, primary_key=True)
+    category: Mapped[EmployeeCategory] = mapped_column(String)
+
+
+class DepartmentCategoryRule(Base):
+    """Maps a ZenHR department string to a dashboard category. Takes
+    priority over JobRoleCategoryRule when assigning a new employee's
+    metric type, since department is usually the more reliable signal."""
+
+    __tablename__ = "department_category_rules"
+
+    department: Mapped[str] = mapped_column(String, primary_key=True)
     category: Mapped[EmployeeCategory] = mapped_column(String)
 
 
@@ -86,6 +98,8 @@ class Employee(Base):
 
     job_title: Mapped[str | None] = mapped_column(String, nullable=True)
     department: Mapped[str | None] = mapped_column(String, nullable=True)
+    manager_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    manager_zenhr_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     category: Mapped[EmployeeCategory] = mapped_column(String, default=EmployeeCategory.UNASSIGNED)
     onboarding_status: Mapped[OnboardingStatus] = mapped_column(
         String, default=OnboardingStatus.PENDING_CONFIRMATION

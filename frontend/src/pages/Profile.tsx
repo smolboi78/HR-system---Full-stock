@@ -69,8 +69,10 @@ export default function Profile() {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">{profile.display_name}</h1>
             <p className="text-muted text-sm mt-0.5">
-              {profile.job_title ?? CATEGORY_LABEL[profile.category]} · {CATEGORY_LABEL[profile.category]}
+              {profile.job_title ?? CATEGORY_LABEL[profile.category]}
+              {profile.department ? ` · ${profile.department}` : ""} · {CATEGORY_LABEL[profile.category]}
             </p>
+            {profile.manager_name && <p className="text-muted text-xs mt-0.5">Reports to {profile.manager_name}</p>}
           </div>
         </div>
         <div className="flex items-center gap-3">
