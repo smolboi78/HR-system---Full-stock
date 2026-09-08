@@ -51,6 +51,18 @@ STARTER_CATEGORY_RULES = {
     "Co-Founder": EmployeeCategory.EXCLUDED,
     "HR Consultant": EmployeeCategory.EXCLUDED,
     "Managing Director": EmployeeCategory.EXCLUDED,
+    # Exact ZenHR job-title strings observed on real new-hire syncs (rule
+    # matching is an exact, case-sensitive dict lookup - see sync.py - so
+    # these are kept separate from the title-cased entries above rather
+    # than merged into them).
+    "Delivery agent": EmployeeCategory.DELIVERY_AGENT,
+    "Account Manager": EmployeeCategory.SALES,
+    "Key Account Manager": EmployeeCategory.SALES,
+    "Senior Account Manager": EmployeeCategory.SALES,
+    "Logistics Supervisor": EmployeeCategory.MANAGEMENT,
+    "HR Executive": EmployeeCategory.EXCLUDED,
+    "office boy": EmployeeCategory.EXCLUDED,
+    "office girl": EmployeeCategory.EXCLUDED,
 }
 
 
