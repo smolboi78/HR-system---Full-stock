@@ -54,7 +54,6 @@ class EmployeeCardOut(BaseModel):
     category: str
     photo_url: str | None
     active: bool
-    onboarding_status: str
     period_hours: float | None = None
     period_visits: int | None = None
     period_days_present: int | None = None
@@ -102,7 +101,6 @@ class EmployeeProfileOut(BaseModel):
     photo_url: str | None
     active: bool
     hiring_date: date | None
-    onboarding_status: str
 
     # ZenHR has no vacation-balance endpoint (confirmed) - purely
     # admin-maintained, not synced.
@@ -121,10 +119,6 @@ class EmployeeProfileOut(BaseModel):
 
 class VacationBalanceRequest(BaseModel):
     balance_days: float | None
-
-
-class ConfirmEmployeeRequest(BaseModel):
-    category: str
 
 
 # ---------- Settings ----------

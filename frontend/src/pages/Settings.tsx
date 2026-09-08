@@ -4,7 +4,6 @@ import { api, authedUrl } from "../api/client";
 import type {
   CategoryRule,
   DepartmentRule,
-  EmployeeCard,
   Holiday,
   NameOverride,
   SyncRun,
@@ -32,70 +31,6 @@ const CATEGORY_OPTIONS: (keyof typeof CATEGORY_LABEL)[] = [
   "SALES_SUPPORT",
   "EXCLUDED",
 ];
-
-function NewHiresSection() {
-  const qc = useQueryClient();
-  const { data: pending } = useQuery({
-    queryKey: ["pending-new-hires"],
-    queryFn: () => api.get<EmployeeCard[]>("/employees/pending/new-hires"),
-  });
-  const [choices, setChoices] = useState<Record<string, string>>({});
-
-  const confirm = useMutation({
-    mutationFn: ({ id, category }: { id: string; category: string }) =>
-      api.post(`/employees/${id}/confirm`, { category }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["pending-new-hires"] });
-      qc.invalidateQueries({ queryKey: ["employees"] });
-    },
-  });
-
-  if (!pending || pending.length === 0) {
-    return (
-      <Section title="New hires" description="Newly detected ZenHR employees needing confirmation before they appear in the directory.">
-        <p className="text-sm text-muted">No pending new hires.</p>
-      </Section>
-    );
-  }
-
-  return (
-    <Section title="New hires" description="Confirm the performance category for each new employee before they go live.">
-      <div className="space-y-2">
-        {pending.map((emp) => (
-          <div key={emp.id} className="flex items-center justify-between gap-3 border border-line rounded-lg px-3 py-2">
-            <div>
-              <div className="text-sm font-medium">{emp.display_name}</div>
-              <div className="text-xs text-muted">{emp.job_title ?? "No title on file"}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <select
-                className="text-sm border border-line rounded-lg px-2 py-1"
-                value={choices[emp.id] ?? ""}
-                onChange={(e) => setChoices((c) => ({ ...c, [emp.id]: e.target.value }))}
-              >
-                <option value="" disabled>
-                  Choose category…
-                </option>
-                {CATEGORY_OPTIONS.map((c) => (
-                  <option key={c} value={c}>
-                    {CATEGORY_LABEL[c]}
-                  </option>
-                ))}
-              </select>
-              <button
-                disabled={!choices[emp.id]}
-                onClick={() => confirm.mutate({ id: emp.id, category: choices[emp.id] })}
-                className="text-sm bg-ink text-paper rounded-lg px-3 py-1 disabled:opacity-40"
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
 
 function HolidaysSection() {
   const qc = useQueryClient();
@@ -466,7 +401,6 @@ export default function Settings() {
         <p className="text-muted text-sm mt-1">Admin only.</p>
       </div>
       <ZenhrConnectBanner />
-      <NewHiresSection />
       <SyncSection />
       <HolidaysSection />
       <DepartmentRulesSection />

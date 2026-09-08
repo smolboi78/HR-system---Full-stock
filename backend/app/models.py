@@ -54,11 +54,6 @@ class EmployeeCategory(str, enum.Enum):
     UNASSIGNED = "UNASSIGNED"
 
 
-class OnboardingStatus(str, enum.Enum):
-    PENDING_CONFIRMATION = "PENDING_CONFIRMATION"
-    ACTIVE = "ACTIVE"
-
-
 class JobRoleCategoryRule(Base):
     """Maps a ZenHR job title string to a dashboard category, used to
     auto-assign new employees' metric type. Checked as a fallback when no
@@ -102,9 +97,6 @@ class Employee(Base):
     manager_name: Mapped[str | None] = mapped_column(String, nullable=True)
     manager_zenhr_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     category: Mapped[EmployeeCategory] = mapped_column(String, default=EmployeeCategory.UNASSIGNED)
-    onboarding_status: Mapped[OnboardingStatus] = mapped_column(
-        String, default=OnboardingStatus.PENDING_CONFIRMATION
-    )
 
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     hiring_date: Mapped[date | None] = mapped_column(Date, nullable=True)

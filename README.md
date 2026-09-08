@@ -13,10 +13,15 @@ vacation, employee/shift data) and Bricks (field sales visit tracking).
 
 ## Status
 
-Directory, profile, auth (admin/view-only), settings (holidays, job-role category
-rules, ZenHR↔Bricks name overrides, user management, new-hire confirmation), and
+Directory, profile, auth (admin/view-only), settings (holidays, job-role/
+department category rules, ZenHR↔Bricks name overrides, user management), and
 downloadable reports (PDF/Excel, per-employee and joint) are built and verified
-locally against seeded demo data.
+locally against seeded demo data. Employees pulled from ZenHR are existing
+staff, not "new hires" - there's no manual confirmation gate. A synced
+employee's category is assigned straight from the department/job-title rules
+in Settings, and they show up immediately under their real department tab in
+the directory; anyone whose title doesn't match a rule yet just needs a rule
+added (or falls back to unassigned until one is).
 
 **Not yet run against real data**: the ZenHR/Bricks sync itself. All endpoints
 are now confirmed against ZenHR's own published Postman collection and

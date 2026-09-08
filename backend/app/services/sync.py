@@ -13,7 +13,6 @@ from app.models import (
     EmployeeCategory,
     EmployeeNameOverride,
     JobRoleCategoryRule,
-    OnboardingStatus,
     SyncRun,
     SyncSource,
     SyncStatus,
@@ -110,7 +109,6 @@ def sync_employees(db: Session) -> SyncRun:
                 employee.termination_date = _parse_date(emp.get("termination_date"))
                 if is_new:
                     employee.category = EmployeeCategory.UNASSIGNED
-                    employee.onboarding_status = OnboardingStatus.PENDING_CONFIRMATION
                     employee.bricks_display_name = overrides.get(employment_number, display)
                 elif employment_number in overrides:
                     employee.bricks_display_name = overrides[employment_number]
@@ -127,7 +125,10 @@ def sync_employees(db: Session) -> SyncRun:
 def sync_professional_data(db: Session, request_delay_s: float = 0.3) -> SyncRun:
     """One request per employee (no branch-level bulk endpoint exists for
     this) - sets job title/department/manager, and applies the department/
-    job-title category rules to anyone still pending new-hire confirmation."""
+    job-title category rules to anyone not yet categorized. Never overwrites
+    a category someone deliberately set (via a rule match or otherwise) -
+    only fills in employees still sitting at the UNASSIGNED default, so an
+    admin's manual call always sticks."""
 
     def _do() -> int:
         category_by_department = {r.department: r.category for r in db.query(DepartmentCategoryRule).all()}
@@ -154,7 +155,7 @@ def sync_professional_data(db: Session, request_delay_s: float = 0.3) -> SyncRun
                 category = (department and category_by_department.get(department)) or (
                     job_title and category_by_role.get(job_title)
                 )
-                if category and employee.onboarding_status == OnboardingStatus.PENDING_CONFIRMATION:
+                if category and employee.category == EmployeeCategory.UNASSIGNED:
                     employee.category = category
 
                 count += 1

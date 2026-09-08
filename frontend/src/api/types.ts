@@ -24,7 +24,6 @@ export interface EmployeeCard {
   category: EmployeeCategory;
   photo_url: string | null;
   active: boolean;
-  onboarding_status: "PENDING_CONFIRMATION" | "ACTIVE";
   period_hours: number | null;
   period_visits: number | null;
   period_days_present: number | null;
@@ -68,7 +67,6 @@ export interface EmployeeProfile {
   photo_url: string | null;
   active: boolean;
   hiring_date: string | null;
-  onboarding_status: "PENDING_CONFIRMATION" | "ACTIVE";
 
   // ZenHR has no vacation-balance endpoint (confirmed) - purely
   // admin-maintained, not synced.

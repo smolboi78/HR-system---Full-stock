@@ -9,13 +9,11 @@ from app.models import (
     AttendanceRecord,
     Employee,
     EmployeeCategory,
-    OnboardingStatus,
     TimeoffTransaction,
     User,
     Visit,
 )
 from app.schemas import (
-    ConfirmEmployeeRequest,
     EmployeeCardOut,
     EmployeeProfileOut,
     TimeoffTransactionOut,
@@ -71,7 +69,6 @@ def list_employees(
                 category=emp.category,
                 photo_url=emp.photo_url,
                 active=emp.active,
-                onboarding_status=emp.onboarding_status,
                 period_hours=summary.hours,
                 period_visits=summary.visits,
                 period_days_present=summary.days_present,
@@ -153,7 +150,6 @@ def get_employee_profile(
         photo_url=employee.photo_url,
         active=employee.active,
         hiring_date=employee.hiring_date,
-        onboarding_status=employee.onboarding_status,
         vacation_balance_days=employee.vacation_balance_days,
         period_hours=summary.hours,
         period_visits=summary.visits,
@@ -163,61 +159,6 @@ def get_employee_profile(
         attendance=attendance,
         timeoff=timeoff,
         visits=visits,
-    )
-
-
-@router.get("/pending/new-hires", response_model=list[EmployeeCardOut])
-def list_pending_new_hires(
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-) -> list[EmployeeCardOut]:
-    employees = (
-        db.query(Employee)
-        .filter(
-            Employee.onboarding_status == OnboardingStatus.PENDING_CONFIRMATION,
-            Employee.active.is_(True),
-        )
-        .order_by(Employee.created_at.desc())
-        .all()
-    )
-    return [
-        EmployeeCardOut(
-            id=e.id,
-            display_name=e.display_name,
-            job_title=e.job_title,
-            department=e.department,
-            category=e.category,
-            photo_url=e.photo_url,
-            active=e.active,
-            onboarding_status=e.onboarding_status,
-        )
-        for e in employees
-    ]
-
-
-@router.post("/{employee_id}/confirm", response_model=EmployeeCardOut)
-def confirm_new_hire(
-    employee_id: str,
-    payload: ConfirmEmployeeRequest,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-) -> EmployeeCardOut:
-    employee = _get_employee_or_404(db, employee_id)
-    if payload.category not in EmployeeCategory.__members__:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown category")
-    employee.category = EmployeeCategory[payload.category]
-    employee.onboarding_status = OnboardingStatus.ACTIVE
-    db.commit()
-    db.refresh(employee)
-    return EmployeeCardOut(
-        id=employee.id,
-        display_name=employee.display_name,
-        job_title=employee.job_title,
-        department=employee.department,
-        category=employee.category,
-        photo_url=employee.photo_url,
-        active=employee.active,
-        onboarding_status=employee.onboarding_status,
     )
 
 

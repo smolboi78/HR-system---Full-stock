@@ -12,7 +12,6 @@ from app.models import (
     AttendanceRecord,
     Employee,
     EmployeeCategory,
-    OnboardingStatus,
     TimeoffTransaction,
     TimeoffType,
     Visit,
@@ -61,9 +60,6 @@ def main() -> None:
                 department=spec["department"],
                 manager_name=spec["manager"],
                 category=spec["category"],
-                onboarding_status=OnboardingStatus.ACTIVE
-                if spec["category"] != EmployeeCategory.UNASSIGNED
-                else OnboardingStatus.PENDING_CONFIRMATION,
                 active=True,
                 hiring_date=date(2024, 1, 15),
                 off_weekdays=WEEKDAY_OFF,
