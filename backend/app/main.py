@@ -1,7 +1,12 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import auth, employees, reports, settings, sync
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
+logging.getLogger("app").setLevel(logging.INFO)
 
 app = FastAPI(title="Full Stock HR Performance Dashboard")
 

@@ -5,14 +5,11 @@ import type { EmployeeCard as EmployeeCardType } from "../api/types";
 import EmployeeCard from "../components/EmployeeCard";
 import PeriodPicker from "../components/PeriodPicker";
 import { lastNDays, type Period } from "../lib/period";
-import { CATEGORY_LABEL } from "../lib/category";
 
-const CATEGORY_FILTERS = ["ALL", "MANAGEMENT", "SALES", "COLLECTOR", "DELIVERY_AGENT", "SALES_SUPPORT"] as const;
 const ALL_DEPARTMENTS = "ALL";
 
 export default function Directory() {
   const [period, setPeriod] = useState<Period>(lastNDays(30));
-  const [category, setCategory] = useState<(typeof CATEGORY_FILTERS)[number]>("ALL");
   const [department, setDepartment] = useState<string>(ALL_DEPARTMENTS);
   const [search, setSearch] = useState("");
 
@@ -33,12 +30,11 @@ export default function Directory() {
   const filtered = useMemo(() => {
     if (!employees) return [];
     return employees.filter((e) => {
-      if (category !== "ALL" && e.category !== category) return false;
       if (department !== ALL_DEPARTMENTS && e.department !== department) return false;
       if (search && !e.display_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [employees, category, department, search]);
+  }, [employees, department, search]);
 
   return (
     <div className="space-y-6">
@@ -66,29 +62,12 @@ export default function Directory() {
         </div>
       )}
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <input
-          placeholder="Search by name…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="text-sm border border-line rounded-lg px-3 py-1.5 bg-white w-56 focus:outline-none focus:ring-2 focus:ring-accent/30"
-        />
-        <div className="flex items-center gap-1 flex-wrap">
-          {CATEGORY_FILTERS.map((c) => (
-            <button
-              key={c}
-              onClick={() => setCategory(c)}
-              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                category === c
-                  ? "bg-ink text-paper border-ink"
-                  : "border-line text-muted hover:text-ink hover:border-ink/30"
-              }`}
-            >
-              {c === "ALL" ? "All" : CATEGORY_LABEL[c]}
-            </button>
-          ))}
-        </div>
-      </div>
+      <input
+        placeholder="Search by name…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="text-sm border border-line rounded-lg px-3 py-1.5 bg-white w-56 focus:outline-none focus:ring-2 focus:ring-accent/30"
+      />
 
       {isLoading && <div className="text-muted text-sm py-12 text-center">Loading directory…</div>}
       {error && <div className="text-red-600 text-sm py-12 text-center">Couldn't load employees.</div>}

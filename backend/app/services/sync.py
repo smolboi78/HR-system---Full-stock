@@ -1,7 +1,10 @@
+import logging
 import time
 from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger("app.sync")
 
 from app.models import (
     AttendanceRecord,
@@ -76,8 +79,20 @@ def sync_employees(db: Session) -> SyncRun:
 
         count = 0
         branches = zenhr_client.list_branches(db)
+        logger.info(
+            "sync_employees: %d branch(es) visible to this OAuth token: %s",
+            len(branches),
+            [(b["id"], (b.get("name") or {}).get("en")) for b in branches],
+        )
         for branch in branches:
-            for emp in zenhr_client.list_employees(db, branch["id"]):
+            branch_employees = zenhr_client.list_employees(db, branch["id"])
+            logger.info(
+                "sync_employees: branch %s (%s) has %d employee(s)",
+                branch["id"],
+                (branch.get("name") or {}).get("en"),
+                len(branch_employees),
+            )
+            for emp in branch_employees:
                 first, last, display = _display_name(emp)
                 employment_number = str(emp["employment_number"])
 

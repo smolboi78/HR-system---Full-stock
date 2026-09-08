@@ -45,6 +45,7 @@ def list_employees(
     period_start: date | None = Query(default=None),
     period_end: date | None = Query(default=None),
     include_excluded: bool = Query(default=False),
+    include_inactive: bool = Query(default=False),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[EmployeeCardOut]:
@@ -53,6 +54,8 @@ def list_employees(
     query = db.query(Employee)
     if not include_excluded:
         query = query.filter(Employee.category != EmployeeCategory.EXCLUDED)
+    if not include_inactive:
+        query = query.filter(Employee.active.is_(True))
     employees = query.order_by(Employee.display_name).all()
 
     cards = []
@@ -170,7 +173,10 @@ def list_pending_new_hires(
 ) -> list[EmployeeCardOut]:
     employees = (
         db.query(Employee)
-        .filter(Employee.onboarding_status == OnboardingStatus.PENDING_CONFIRMATION)
+        .filter(
+            Employee.onboarding_status == OnboardingStatus.PENDING_CONFIRMATION,
+            Employee.active.is_(True),
+        )
         .order_by(Employee.created_at.desc())
         .all()
     )
