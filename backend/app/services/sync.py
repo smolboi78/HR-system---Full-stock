@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -41,6 +41,24 @@ def _run(db: Session, source: SyncSource, fn) -> SyncRun:
     return run
 
 
+def _parse_date(value: str | None) -> date | None:
+    """ZenHR sends dates as ISO strings. Postgres has no implicit
+    date = varchar operator, so filtering/comparing against a Date column
+    needs an actual date object, not the raw string - an INSERT with the
+    raw string can still succeed (assignment cast), which is why this only
+    showed up on a second sync run's existing-record lookup, not the
+    first."""
+    if not value:
+        return None
+    return date.fromisoformat(value[:10])
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 def _display_name(emp: dict) -> tuple[str, str, str]:
     name = ((emp.get("user") or {}).get("name") or {}).get("en") or {}
     first = (name.get("first_name") or "").strip()
@@ -73,8 +91,8 @@ def sync_employees(db: Session) -> SyncRun:
                 employee.last_name = last
                 employee.display_name = display
                 employee.active = emp.get("active", True)
-                employee.hiring_date = emp.get("hiring_date")
-                employee.termination_date = emp.get("termination_date")
+                employee.hiring_date = _parse_date(emp.get("hiring_date"))
+                employee.termination_date = _parse_date(emp.get("termination_date"))
                 if is_new:
                     employee.category = EmployeeCategory.UNASSIGNED
                     employee.onboarding_status = OnboardingStatus.PENDING_CONFIRMATION
@@ -204,8 +222,8 @@ def sync_timeoffs(db: Session, date_from: str, date_to: str) -> SyncRun:
                 row = existing or TimeoffTransaction(employee_id=employee.id, zenhr_transaction_id=tx["id"])
                 row.employee_id = employee.id
                 row.timeoff_type_id = (tx.get("timeoff") or {}).get("id")
-                row.from_date = tx["from_date"][:10]
-                row.to_date = tx["to_date"][:10]
+                row.from_date = _parse_date(tx["from_date"])
+                row.to_date = _parse_date(tx["to_date"])
                 row.amount = tx.get("amount") or 0
                 row.status = tx.get("status", "")
                 row.notes = tx.get("notes") or None
@@ -235,15 +253,16 @@ def sync_attendance(db: Session, date_from: str, date_to: str) -> SyncRun:
                 if not employee:
                     continue  # run sync_employees first; skip rather than fail the batch
 
+                attendance_date = _parse_date(rec["attendance_date"])
                 existing = db.query(AttendanceRecord).filter_by(
-                    employee_id=employee.id, attendance_date=rec["attendance_date"]
+                    employee_id=employee.id, attendance_date=attendance_date
                 ).first()
-                row = existing or AttendanceRecord(employee_id=employee.id, attendance_date=rec["attendance_date"])
-                row.entry_time = rec.get("entry_time")
-                row.exit_time = rec.get("exit_time")
+                row = existing or AttendanceRecord(employee_id=employee.id, attendance_date=attendance_date)
+                row.entry_time = _parse_datetime(rec.get("entry_time"))
+                row.exit_time = _parse_datetime(rec.get("exit_time"))
                 row.worked_minutes = _worked_minutes(rec.get("entry_time"), rec.get("exit_time"))
                 row.status = rec.get("missing_status", "present")
-                row.source_updated_at = rec.get("updated_at")
+                row.source_updated_at = _parse_datetime(rec.get("updated_at"))
                 if not existing:
                     db.add(row)
                 count += 1
@@ -286,7 +305,7 @@ def sync_visits(db: Session, created_from: str, created_to: str) -> SyncRun:
                 row.is_successful = visit.get("is_successful")
                 row.is_planned = visit.get("is_planned", False)
                 row.status = visit.get("status", "")
-                row.visit_time = visit["visit_time"]
+                row.visit_time = _parse_datetime(visit["visit_time"])
                 row.duration_ms = visit.get("duration")
                 if not existing:
                     db.add(row)
