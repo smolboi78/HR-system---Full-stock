@@ -1,7 +1,8 @@
-"""BricksRep visits API client. Written from an OpenAPI spec shared in an
-earlier session (not available in this one) but never exercised against the
-live API - see docs/api-endpoint-mapping.md #6. Field names/types should be
-spot-checked against a real response once BRICKS_API_KEY is available.
+"""BricksRep visits API client. Matches the official
+`visitslistcount.openapi.json` OpenAPI spec exactly (request shape,
+response shape, every field read off a VisitResp) - see
+docs/api-endpoint-mapping.md #7. Not yet exercised against the live API,
+since BRICKS_API_KEY isn't set in this environment.
 """
 
 from typing import Any
