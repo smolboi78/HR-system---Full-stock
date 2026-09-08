@@ -20,8 +20,26 @@ from app.models import ZenhrOAuthToken
 
 EXPIRY_BUFFER_SECONDS = 60
 
-# Confirmed from a real who_am_i response's token_info.scopes.
-SCOPES = "read.branch read.employee read.professional_info read.timeoff read.attendance_record"
+# Confirmed from the actual granted-scopes list on the live OAuth
+# application (colon-separated, e.g. "read:employee" - NOT the dotted form
+# seen in a who_am_i response's token_info.scopes, which turned out to be
+# an internal/serialized representation, not the request format ZenHR's
+# /oauth/authorize endpoint accepts).
+#
+# timeoffs (types) and timeoff_transactions (the actual leave/vacation
+# records) are separate scopes - easy to miss since they look related.
+SCOPES = " ".join(
+    [
+        "read:branch",
+        "read:employee",
+        "read:professional_info",
+        "read:attendance_record",
+        "read:timeoff",
+        "read:timeoff_transaction",
+        "read:employee_shift",
+        "read:work_shift",
+    ]
+)
 
 
 def _api_origin() -> str:

@@ -145,14 +145,28 @@ official OpenAPI spec. `backend/app/services/bricks_client.py` matches it
 exactly - request shape, response shape, and every field the sync code
 reads off a `VisitResp`. No code changes needed.
 
-## OAuth scopes — fixed, was wrong
+## OAuth scopes — fixed, was wrong (twice)
 
-A real `who_am_i` response's `token_info.scopes` confirmed ZenHR scopes use
-**dots**, not colons: `read.branch`, `read.employee`, `read.professional_info`,
-`read.timeoff`, `read.attendance_record`. The original client code requested
-`read:employee read:branch read:attendance_record` (colons, and missing the
-professional_info/timeoff scopes needed for #2 and #4 above) - fixed in
-`zenhr_client.SCOPES`.
+First attempt requested `read:employee read:branch read:attendance_record`
+(colons), missing the professional_info/timeoff scopes #2 and #4 need.
+Second attempt switched to dots (`read.branch`, `read.employee`, ...) based
+on a `who_am_i` response's `token_info.scopes` field - ZenHR rejected that
+with `invalid_scope`. Turns out that dotted form is how granted scopes get
+*serialized back* in a token, not the format `/oauth/authorize` accepts for
+*requesting* them. The actual live OAuth application's granted-scopes list
+(seen directly) confirmed colons are right after all, but with two scopes
+easy to miss:
+
+- `timeoffs` (the types, #4 above) and `timeoff_transactions` (the actual
+  leave/vacation records) are **separate** scopes -
+  `read:timeoff` alone doesn't cover pulling transaction data.
+- Also needed: `read:professional_info` (#2), `read:employee_shift` and
+  `read:work_shift` (#6) - all confirmed present in the app's actual
+  granted-scopes list.
+
+Current (hopefully final) scope list in `zenhr_client.SCOPES`: `read:branch
+read:employee read:professional_info read:attendance_record read:timeoff
+read:timeoff_transaction read:employee_shift read:work_shift`.
 
 ## What's still genuinely open
 
