@@ -8,10 +8,12 @@ import { lastNDays, type Period } from "../lib/period";
 import { CATEGORY_LABEL } from "../lib/category";
 
 const CATEGORY_FILTERS = ["ALL", "MANAGEMENT", "SALES", "COLLECTOR", "DELIVERY_AGENT", "SALES_SUPPORT"] as const;
+const ALL_DEPARTMENTS = "ALL";
 
 export default function Directory() {
   const [period, setPeriod] = useState<Period>(lastNDays(30));
   const [category, setCategory] = useState<(typeof CATEGORY_FILTERS)[number]>("ALL");
+  const [department, setDepartment] = useState<string>(ALL_DEPARTMENTS);
   const [search, setSearch] = useState("");
 
   const { data: employees, isLoading, error } = useQuery({
@@ -19,14 +21,24 @@ export default function Directory() {
     queryFn: () => api.get<EmployeeCardType[]>(`/employees?period_start=${period.start}&period_end=${period.end}`),
   });
 
+  // Department tabs come straight from what's synced from ZenHR - no
+  // hardcoded list, so they always match whatever departments actually
+  // exist on the roster.
+  const departments = useMemo(() => {
+    if (!employees) return [];
+    const set = new Set(employees.map((e) => e.department).filter((d): d is string => !!d));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [employees]);
+
   const filtered = useMemo(() => {
     if (!employees) return [];
     return employees.filter((e) => {
       if (category !== "ALL" && e.category !== category) return false;
+      if (department !== ALL_DEPARTMENTS && e.department !== department) return false;
       if (search && !e.display_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [employees, category, search]);
+  }, [employees, category, department, search]);
 
   return (
     <div className="space-y-6">
@@ -37,6 +49,22 @@ export default function Directory() {
         </div>
         <PeriodPicker period={period} onChange={setPeriod} />
       </div>
+
+      {departments.length > 0 && (
+        <div className="flex items-center gap-1 border-b border-line overflow-x-auto">
+          {[ALL_DEPARTMENTS, ...departments].map((d) => (
+            <button
+              key={d}
+              onClick={() => setDepartment(d)}
+              className={`px-4 py-2.5 text-sm whitespace-nowrap -mb-px border-b-2 transition-colors ${
+                department === d ? "border-ink text-ink font-medium" : "border-transparent text-muted hover:text-ink"
+              }`}
+            >
+              {d === ALL_DEPARTMENTS ? "All departments" : d}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex items-center gap-3 flex-wrap">
         <input

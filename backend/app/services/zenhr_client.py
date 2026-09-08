@@ -34,6 +34,11 @@ SCOPES = " ".join(
         "read:employee",
         "read:professional_info",
         "read:attendance_record",
+        # No endpoint in ZenHR's published Postman collection uses this -
+        # only attendance_records, which we already call - but it's a
+        # distinct scope in the app's granted-scopes list and harmless to
+        # request in case it covers something not in that collection.
+        "read:attendance_transaction",
         "read:timeoff",
         "read:timeoff_transaction",
         "read:employee_shift",
