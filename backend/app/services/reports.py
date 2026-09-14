@@ -60,7 +60,7 @@ def employee_report_excel(db: Session, employee: Employee, start: date, end: dat
         [
             {
                 "Employee": employee.display_name,
-                "Job title": employee.job_title or "",
+                "Job title": employee.effective_job_title or "",
                 "Category": employee.category,
                 "Period": data["period"],
                 "Hours worked": data["summary"].hours,
@@ -97,7 +97,7 @@ _EMPLOYEE_PDF_TEMPLATE = Template(
       .stat .label { font-size: 11px; color: #666; }
     </style></head><body>
       <h1>{{ employee.display_name }}</h1>
-      <div class="meta">{{ employee.job_title or "" }} &middot; {{ period }}</div>
+      <div class="meta">{{ employee.effective_job_title or "" }} &middot; {{ period }}</div>
       <div class="summary">
         <div class="stat"><div class="value">{{ summary.hours }}</div><div class="label">Hours worked</div></div>
         <div class="stat"><div class="value">{{ summary.visits }}</div><div class="label">Visits</div></div>
@@ -138,7 +138,7 @@ def joint_report_rows(db: Session, start: date, end: date) -> list[dict]:
         rows.append(
             {
                 "Employee": employee.display_name,
-                "Job title": employee.job_title or "",
+                "Job title": employee.effective_job_title or "",
                 "Category": employee.category,
                 "Hours worked": summary.hours,
                 "Visits": summary.visits,

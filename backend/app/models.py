@@ -120,6 +120,13 @@ class Employee(Base):
     manager_zenhr_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     category: Mapped[EmployeeCategory] = mapped_column(String, default=EmployeeCategory.UNASSIGNED)
 
+    # Admin corrections layered ON TOP of what ZenHR sends, set in Settings.
+    # They can't just edit job_title/department: sync_professional_data
+    # rewrites those from ZenHR on every run, so a correction stored there
+    # would be silently wiped the next time anyone hit "Sync now".
+    job_title_override: Mapped[str | None] = mapped_column(String, nullable=True)
+    org_group_override: Mapped[str | None] = mapped_column(String, nullable=True)
+
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     hiring_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     termination_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -140,6 +147,12 @@ class Employee(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+    @property
+    def effective_job_title(self) -> str | None:
+        """What the dashboard shows and groups on - the admin's correction
+        if there is one, otherwise whatever ZenHR last sent."""
+        return self.job_title_override or self.job_title
 
 
 class EmployeeNameOverride(Base):

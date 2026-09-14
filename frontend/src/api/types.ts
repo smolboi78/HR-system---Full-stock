@@ -20,6 +20,17 @@ export interface Department {
   name: string;
 }
 
+export interface EmployeeOverride {
+  id: string;
+  display_name: string;
+  synced_job_title: string | null;
+  synced_department: string | null;
+  job_title_override: string | null;
+  org_group_override: string | null;
+  effective_job_title: string | null;
+  effective_org_group: string;
+}
+
 export interface EmployeeCard {
   id: string;
   display_name: string;

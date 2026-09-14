@@ -3,12 +3,21 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import require_admin
-from app.models import DepartmentCategoryRule, EmployeeNameOverride, Holiday, JobRoleCategoryRule, User
+from app.models import (
+    DepartmentCategoryRule,
+    Employee,
+    EmployeeNameOverride,
+    Holiday,
+    JobRoleCategoryRule,
+    User,
+)
 from app.schemas import (
     CategoryRuleOut,
     CategoryRuleRequest,
     DepartmentRuleOut,
     DepartmentRuleRequest,
+    EmployeeOverrideOut,
+    EmployeeOverrideRequest,
     HolidayCreateRequest,
     HolidayOut,
     NameOverrideOut,
@@ -18,6 +27,7 @@ from app.schemas import (
     UserUpdateRequest,
 )
 from app.security import hash_password
+from app.services import org_chart
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -121,6 +131,60 @@ def delete_department_rule(department: str, db: Session = Depends(get_db), _: Us
     db.delete(rule)
     db.commit()
     return {"ok": True}
+
+
+# ---------- Per-employee title / group corrections ----------
+
+
+def _override_row(employee: Employee) -> EmployeeOverrideOut:
+    return EmployeeOverrideOut(
+        id=employee.id,
+        display_name=employee.display_name,
+        synced_job_title=employee.job_title,
+        synced_department=employee.department,
+        job_title_override=employee.job_title_override,
+        org_group_override=employee.org_group_override,
+        effective_job_title=employee.effective_job_title,
+        effective_org_group=org_chart.group_for_employee(employee),
+    )
+
+
+@router.get("/employee-overrides", response_model=list[EmployeeOverrideOut])
+def list_employee_overrides(
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[EmployeeOverrideOut]:
+    query = db.query(Employee)
+    if not include_inactive:
+        query = query.filter(Employee.active.is_(True))
+    return [_override_row(e) for e in query.order_by(Employee.display_name).all()]
+
+
+@router.put("/employee-overrides/{employee_id}", response_model=EmployeeOverrideOut)
+def set_employee_override(
+    employee_id: str,
+    payload: EmployeeOverrideRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> EmployeeOverrideOut:
+    employee = db.get(Employee, employee_id)
+    if not employee:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+
+    group = (payload.org_group or "").strip()
+    if group and group not in org_chart.ORG_GROUPS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Unknown group '{group}' - must be one of: {', '.join(org_chart.ORG_GROUPS)}",
+        )
+
+    # Blank clears the override so the person falls back to ZenHR's value.
+    employee.job_title_override = (payload.job_title or "").strip() or None
+    employee.org_group_override = group or None
+    db.commit()
+    db.refresh(employee)
+    return _override_row(employee)
 
 
 # ---------- ZenHR <-> Bricks name overrides ----------

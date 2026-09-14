@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, authedUrl } from "../api/client";
 import type {
   CategoryRule,
+  Department,
   DepartmentRule,
+  EmployeeOverride,
   Holiday,
   NameOverride,
   SyncRun,
@@ -31,6 +33,116 @@ const CATEGORY_OPTIONS: (keyof typeof CATEGORY_LABEL)[] = [
   "SALES_SUPPORT",
   "EXCLUDED",
 ];
+
+const AUTO_GROUP = "";
+
+function EmployeeOverridesSection() {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, { title: string; group: string }>>({});
+
+  const { data: rows } = useQuery({
+    queryKey: ["employee-overrides"],
+    queryFn: () => api.get<EmployeeOverride[]>("/settings/employee-overrides"),
+  });
+  const { data: groups } = useQuery({
+    queryKey: ["departments"],
+    queryFn: () => api.get<Department[]>("/employees/departments"),
+  });
+
+  const save = useMutation({
+    mutationFn: ({ id, title, group }: { id: string; title: string; group: string }) =>
+      api.put(`/settings/employee-overrides/${id}`, { job_title: title, org_group: group }),
+    onSuccess: (_data, vars) => {
+      setDrafts((d) => {
+        const next = { ...d };
+        delete next[vars.id];
+        return next;
+      });
+      qc.invalidateQueries({ queryKey: ["employee-overrides"] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
+    },
+  });
+
+  const filtered = (rows ?? []).filter((r) =>
+    search ? r.display_name.toLowerCase().includes(search.toLowerCase()) : true
+  );
+
+  const draftFor = (row: EmployeeOverride) =>
+    drafts[row.id] ?? {
+      title: row.job_title_override ?? "",
+      group: row.org_group_override ?? AUTO_GROUP,
+    };
+
+  const isDirty = (row: EmployeeOverride) => {
+    const d = drafts[row.id];
+    if (!d) return false;
+    return d.title !== (row.job_title_override ?? "") || d.group !== (row.org_group_override ?? AUTO_GROUP);
+  };
+
+  return (
+    <Section
+      title="Employee titles & departments"
+      description="Correct anyone whose ZenHR job title or department puts them in the wrong place. These corrections survive every sync — ZenHR's own values are kept underneath and shown in grey. Leave a field blank to go back to ZenHR's value."
+    >
+      <input
+        placeholder="Search by name…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="text-sm border border-line rounded-lg px-3 py-1.5 bg-white w-56 focus:outline-none focus:ring-2 focus:ring-accent/30"
+      />
+
+      {!rows && <p className="text-sm text-muted">Loading employees…</p>}
+      {rows && filtered.length === 0 && <p className="text-sm text-muted">No employees match that search.</p>}
+
+      <div className="space-y-2">
+        {filtered.map((row) => {
+          const draft = draftFor(row);
+          const dirty = isDirty(row);
+          return (
+            <div key={row.id} className="border border-line rounded-lg px-3 py-2.5 space-y-2">
+              <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                <div className="text-sm font-medium">{row.display_name}</div>
+                <div className="text-[11px] text-muted">
+                  ZenHR: {row.synced_job_title || "no title"}
+                  {row.synced_department ? ` · ${row.synced_department}` : ""} → currently in{" "}
+                  <span className="font-medium text-ink">{row.effective_org_group}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  placeholder={row.synced_job_title || "Job title"}
+                  value={draft.title}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [row.id]: { ...draft, title: e.target.value } }))}
+                  className="text-sm border border-line rounded-lg px-2 py-1 flex-1 min-w-[12rem]"
+                />
+                <select
+                  value={draft.group}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [row.id]: { ...draft, group: e.target.value } }))}
+                  className="text-sm border border-line rounded-lg px-2 py-1"
+                >
+                  <option value={AUTO_GROUP}>Auto (from title)</option>
+                  {(groups ?? []).map((g) => (
+                    <option key={g.name} value={g.name}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  disabled={!dirty || save.isPending}
+                  onClick={() => save.mutate({ id: row.id, title: draft.title, group: draft.group })}
+                  className="text-sm bg-ink text-paper rounded-lg px-3 py-1 disabled:opacity-40"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
 
 function HolidaysSection() {
   const qc = useQueryClient();
@@ -402,6 +514,7 @@ export default function Settings() {
       </div>
       <ZenhrConnectBanner />
       <SyncSection />
+      <EmployeeOverridesSection />
       <HolidaysSection />
       <DepartmentRulesSection />
       <CategoryRulesSection />

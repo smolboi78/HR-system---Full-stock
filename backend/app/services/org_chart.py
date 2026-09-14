@@ -102,3 +102,11 @@ def group_for(department: str | None, job_title: str | None) -> str:
         or _DEPARTMENT_TO_GROUP.get(_key(department))
         or UNGROUPED
     )
+
+
+def group_for_employee(employee) -> str:
+    """The group an employee actually appears under. An admin's explicit
+    group override wins outright; otherwise it's derived from their
+    corrected job title, so fixing just the title in Settings usually moves
+    someone to the right tab without touching the group at all."""
+    return employee.org_group_override or group_for(employee.department, employee.effective_job_title)

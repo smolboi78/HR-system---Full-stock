@@ -134,6 +134,29 @@ class VacationBalanceRequest(BaseModel):
     balance_days: float | None
 
 
+class EmployeeOverrideOut(BaseModel):
+    """One row of the Settings editor: what ZenHR sent, what the admin has
+    corrected it to, and where the person currently lands as a result."""
+
+    id: str
+    display_name: str
+
+    synced_job_title: str | None
+    synced_department: str | None
+
+    job_title_override: str | None
+    org_group_override: str | None
+
+    effective_job_title: str | None
+    effective_org_group: str
+
+
+class EmployeeOverrideRequest(BaseModel):
+    # Empty string or null clears the override and falls back to ZenHR.
+    job_title: str | None = None
+    org_group: str | None = None
+
+
 # ---------- Settings ----------
 
 
