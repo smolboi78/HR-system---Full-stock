@@ -8,6 +8,7 @@ logger = logging.getLogger("app.sync")
 
 from app.models import (
     AttendanceRecord,
+    Department,
     DepartmentCategoryRule,
     Employee,
     EmployeeCategory,
@@ -117,6 +118,34 @@ def sync_employees(db: Session) -> SyncRun:
                     db.add(employee)
                 count += 1
         db.commit()
+        return count
+
+    return _run(db, SyncSource.ZENHR, _do)
+
+
+def sync_departments(db: Session) -> SyncRun:
+    """The company's canonical department list (branch-level bulk endpoint,
+    no N+1). ZenHR has no org-chart/hierarchy endpoint - departments are
+    flat, confirmed against its own Postman collection - so this is the
+    closest real "org chart" data available: the department a person
+    belongs to. Drives the directory's department tabs so they match
+    ZenHR's own names/ids instead of whatever distinct strings happen to
+    show up on synced employees."""
+
+    def _do() -> int:
+        count = 0
+        for branch in zenhr_client.list_branches(db):
+            for dept in zenhr_client.list_departments(db, branch["id"]):
+                existing = db.query(Department).filter_by(zenhr_department_id=dept["id"]).first()
+                row = existing or Department(zenhr_department_id=dept["id"])
+                row.zenhr_branch_id = branch["id"]
+                name = dept.get("name") or {}
+                row.name = name.get("en") or name.get("ar") or f"Department {dept['id']}"
+                row.name_ar = name.get("ar") or None
+                if not existing:
+                    db.add(row)
+                count += 1
+            db.commit()
         return count
 
     return _run(db, SyncSource.ZENHR, _do)
@@ -345,6 +374,7 @@ def run_full_sync(db: Session) -> list[SyncRun]:
     frm = to - timedelta(days=DEFAULT_SYNC_WINDOW_DAYS)
     runs = [
         sync_employees(db),
+        sync_departments(db),
         sync_professional_data(db),
         sync_shifts(db),
         sync_attendance(db, frm.isoformat(), to.isoformat()),

@@ -42,6 +42,16 @@ class UserUpdateRequest(BaseModel):
     password: str | None = None
 
 
+# ---------- Departments ----------
+
+
+class DepartmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+
+
 # ---------- Employees ----------
 
 

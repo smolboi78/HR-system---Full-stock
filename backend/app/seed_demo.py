@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from app.db import SessionLocal
 from app.models import (
     AttendanceRecord,
+    Department,
     Employee,
     EmployeeCategory,
     TimeoffTransaction,
@@ -21,6 +22,17 @@ DEMO_TIMEOFF_TYPES = [
     {"id": 1, "name": "Annual Vacation", "class_name": "AnnualVacation"},
     {"id": 2, "name": "Sick Leave", "class_name": "SickLeave"},
     {"id": 3, "name": "Personal Excuse", "class_name": "Excuse"},
+]
+
+# Matches the DEMO_EMPLOYEES departments below - mirrors what
+# sync_departments() would populate from ZenHR's real /departments
+# endpoint, so the directory's department tabs work the same way locally
+# as they do against real data.
+DEMO_DEPARTMENTS = [
+    {"id": 1, "name": "Operations"},
+    {"id": 2, "name": "Sales"},
+    {"id": 3, "name": "Finance"},
+    {"id": 4, "name": "Logistics"},
 ]
 
 DEMO_EMPLOYEES = [
@@ -44,6 +56,10 @@ def main() -> None:
         for t in DEMO_TIMEOFF_TYPES:
             if not db.get(TimeoffType, t["id"]):
                 db.add(TimeoffType(**t))
+
+        for d in DEMO_DEPARTMENTS:
+            if not db.query(Department).filter_by(zenhr_department_id=d["id"]).first():
+                db.add(Department(zenhr_department_id=d["id"], zenhr_branch_id=0, name=d["name"]))
         db.flush()
 
         for idx, spec in enumerate(DEMO_EMPLOYEES, start=1000):

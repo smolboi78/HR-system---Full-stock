@@ -7,6 +7,7 @@ from app.db import get_db
 from app.deps import get_current_user, require_admin
 from app.models import (
     AttendanceRecord,
+    Department,
     Employee,
     EmployeeCategory,
     TimeoffTransaction,
@@ -14,6 +15,7 @@ from app.models import (
     Visit,
 )
 from app.schemas import (
+    DepartmentOut,
     EmployeeCardOut,
     EmployeeProfileOut,
     TimeoffTransactionOut,
@@ -76,6 +78,18 @@ def list_employees(
             )
         )
     return cards
+
+
+@router.get("/departments", response_model=list[DepartmentOut])
+def list_departments(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> list[Department]:
+    """The company's canonical department list, synced straight from
+    ZenHR - not derived from whatever distinct Employee.department strings
+    happen to be present, so a department shows up (in ZenHR's own name)
+    even before anyone in it has synced."""
+    return db.query(Department).order_by(Department.name).all()
 
 
 def _get_employee_or_404(db: Session, employee_id: str) -> Employee:

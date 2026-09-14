@@ -76,6 +76,28 @@ class DepartmentCategoryRule(Base):
     category: Mapped[EmployeeCategory] = mapped_column(String)
 
 
+# ---------- Departments ----------
+
+
+class Department(Base):
+    """The company's canonical department list, synced from ZenHR's
+    branch-level /departments endpoint (flat - ZenHR has no parent/child
+    department hierarchy, confirmed against its own Postman collection).
+    Used to drive the directory's department tabs so a department shows up
+    even before anyone in it has synced, and in ZenHR's own name/order -
+    not just whatever distinct Employee.department strings happen to be
+    present."""
+
+    __tablename__ = "departments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
+
+    zenhr_department_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    zenhr_branch_id: Mapped[int] = mapped_column(Integer, index=True, default=0)
+    name: Mapped[str] = mapped_column(String)
+    name_ar: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
 # ---------- Employees ----------
 
 

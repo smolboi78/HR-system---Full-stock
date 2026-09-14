@@ -43,6 +43,10 @@ SCOPES = " ".join(
         "read:timeoff_transaction",
         "read:employee_shift",
         "read:work_shift",
+        # Covers the whole "Organization Levels" endpoint group in ZenHR's
+        # granted-scopes list - departments, sections, sites, business
+        # units, etc. - not a per-resource "read:department" scope.
+        "read:organization_level",
     ]
 )
 
@@ -154,6 +158,14 @@ def list_branches(db: Session) -> list[dict]:
 
 def list_employees(db: Session, branch_id: int) -> list[dict]:
     return _fetch_all_pages(db, f"/api/v3/branches/{branch_id}/employees", {})
+
+
+def list_departments(db: Session, branch_id: int) -> list[dict]:
+    """Confirmed: {id, name: {ar, en}, created_at, updated_at} - a flat
+    list, no parent/child hierarchy field. ZenHR's published Postman
+    collection has no org-chart/hierarchy endpoint at all; department
+    parentage isn't a thing ZenHR models."""
+    return _fetch_all_pages(db, f"/api/v3/branches/{branch_id}/departments", {})
 
 
 def list_attendance_records(db: Session, branch_id: int, date_from: str, date_to: str) -> list[dict]:

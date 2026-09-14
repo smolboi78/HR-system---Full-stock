@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { EmployeeCard as EmployeeCardType } from "../api/types";
+import type { Department, EmployeeCard as EmployeeCardType } from "../api/types";
 import EmployeeCard from "../components/EmployeeCard";
 import PeriodPicker from "../components/PeriodPicker";
 import { lastNDays, type Period } from "../lib/period";
@@ -18,14 +18,24 @@ export default function Directory() {
     queryFn: () => api.get<EmployeeCardType[]>(`/employees?period_start=${period.start}&period_end=${period.end}`),
   });
 
-  // Department tabs come straight from what's synced from ZenHR - no
-  // hardcoded list, so they always match whatever departments actually
-  // exist on the roster.
+  const { data: canonicalDepartments } = useQuery({
+    queryKey: ["departments"],
+    queryFn: () => api.get<Department[]>("/employees/departments"),
+  });
+
+  // Department tabs come from ZenHR's own department list (synced
+  // separately, see sync_departments()) rather than being derived from
+  // whatever distinct department strings happen to appear on synced
+  // employees - so a department shows up in ZenHR's own name even before
+  // anyone in it has synced. Any stray department string that shows up on
+  // an employee but isn't in that canonical list (shouldn't normally
+  // happen - same sync source) still gets a tab, just appended.
   const departments = useMemo(() => {
-    if (!employees) return [];
-    const set = new Set(employees.map((e) => e.department).filter((d): d is string => !!d));
+    const canonical = (canonicalDepartments ?? []).map((d) => d.name);
+    const fromEmployees = (employees ?? []).map((e) => e.department).filter((d): d is string => !!d);
+    const set = new Set([...canonical, ...fromEmployees]);
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [employees]);
+  }, [canonicalDepartments, employees]);
 
   const filtered = useMemo(() => {
     if (!employees) return [];

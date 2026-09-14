@@ -15,6 +15,11 @@ export type EmployeeCategory =
   | "EXCLUDED"
   | "UNASSIGNED";
 
+export interface Department {
+  id: string;
+  name: string;
+}
+
 export interface EmployeeCard {
   id: string;
   display_name: string;

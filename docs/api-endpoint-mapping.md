@@ -145,6 +145,39 @@ official OpenAPI spec. `backend/app/services/bricks_client.py` matches it
 exactly - request shape, response shape, and every field the sync code
 reads off a `VisitResp`. No code changes needed.
 
+## 8. Departments / "org chart" — CONFIRMED (endpoint), NO HIERARCHY EXISTS
+
+Checked ZenHR's full Postman collection for anything resembling an org
+chart - a department tree, a reporting-hierarchy endpoint, parent/child
+department links. **None of that exists.** The closest thing is
+`GET /api/v3/branches/{branch_id}/departments` (paginated, branch-level
+bulk - no N+1), and its own response shape is flat:
+
+```json
+{ "id": 581, "name": { "ar": null, "en": "IT Department" }, "created_at": "...", "updated_at": "..." }
+```
+
+No `parent_id`, no `parent_department`, nothing hierarchical - confirmed
+directly from the Postman collection's own example responses and schema
+tests. Departments in ZenHR are a flat list, full stop.
+
+Scope: not a `read:department` scope - covered by `read:organization_level`,
+which is the scope for ZenHR's whole "Organization Levels" endpoint group
+(departments, sections, sites, business units, segments, divisions, main
+projects, hierarchy groups). Confirmed against the live OAuth app's
+granted-scopes list and added to `zenhr_client.SCOPES`.
+
+`sync_departments()` syncs this into a new `Department` table and
+`GET /api/employees/departments` serves it to the frontend, so the
+directory's department tabs are driven by ZenHR's own canonical
+department list/names (and show up even before anyone in that department
+has synced) instead of being derived from whatever distinct
+`Employee.department` strings happen to be present. This - department
+membership, plus the `manager_name`/`manager_zenhr_id` already pulled
+per-employee from `professional_data` (#2) - is the actual "org chart"
+data ZenHR has to offer; there's no separate tree structure to fetch on
+top of it.
+
 ## OAuth scopes — fixed, was wrong (twice)
 
 First attempt requested `read:employee read:branch read:attendance_record`
@@ -165,8 +198,10 @@ easy to miss:
   granted-scopes list.
 
 Current (hopefully final) scope list in `zenhr_client.SCOPES`: `read:branch
-read:employee read:professional_info read:attendance_record read:timeoff
-read:timeoff_transaction read:employee_shift read:work_shift`.
+read:employee read:professional_info read:attendance_record
+read:attendance_transaction read:timeoff read:timeoff_transaction
+read:employee_shift read:work_shift read:organization_level` (the last one
+added for #8, departments).
 
 ## What's still genuinely open
 
