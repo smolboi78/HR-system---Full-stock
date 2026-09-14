@@ -54,7 +54,12 @@ def compute_period_summary(db: Session, employee: Employee, start: date, end: da
         .all()
     )
     hours = sum((a.worked_minutes or 0) for a in attendance) / 60
-    days_present = sum(1 for a in attendance if a.status == "present")
+    # A day counts as present if the employee actually clocked in. Matching
+    # on a status string does NOT work here: ZenHR's missing_status carries
+    # values like "complete" plus an open-ended set of absence reasons, so
+    # the old `status == "present"` check only ever matched the demo seeder
+    # and scored every real employee as 0 days present in production.
+    days_present = len({a.attendance_date for a in attendance if a.entry_time is not None})
 
     visits = (
         db.query(Visit)

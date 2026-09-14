@@ -154,10 +154,10 @@ def sync_departments(db: Session) -> SyncRun:
 def sync_professional_data(db: Session, request_delay_s: float = 0.3) -> SyncRun:
     """One request per employee (no branch-level bulk endpoint exists for
     this) - sets job title/department/manager, and applies the department/
-    job-title category rules to anyone not yet categorized. Never overwrites
-    a category someone deliberately set (via a rule match or otherwise) -
-    only fills in employees still sitting at the UNASSIGNED default, so an
-    admin's manual call always sticks."""
+    job-title category rules. The rules are the only thing that assigns a
+    category (there's no per-employee manual override any more), so they're
+    re-applied on every sync: editing a rule in Settings takes effect on the
+    next sync instead of being frozen out by whatever was assigned first."""
 
     def _do() -> int:
         category_by_department = {r.department: r.category for r in db.query(DepartmentCategoryRule).all()}
@@ -181,10 +181,20 @@ def sync_professional_data(db: Session, request_delay_s: float = 0.3) -> SyncRun
                 employee.manager_name = manager.get("name")
                 employee.manager_zenhr_id = manager.get("id")
 
-                category = (department and category_by_department.get(department)) or (
-                    job_title and category_by_role.get(job_title)
-                )
-                if category and employee.category == EmployeeCategory.UNASSIGNED:
+                dept_category = category_by_department.get(department) if department else None
+                role_category = category_by_role.get(job_title) if job_title else None
+
+                # An explicit EXCLUDED rule wins over everything else.
+                # "Never show this person" is a stronger statement than a
+                # department-wide default, so a broad department rule can't
+                # drag an excluded job title (Managing Director, HR
+                # Consultant) back into the directory.
+                if EmployeeCategory.EXCLUDED in (dept_category, role_category):
+                    category = EmployeeCategory.EXCLUDED
+                else:
+                    category = dept_category or role_category
+
+                if category:
                     employee.category = category
 
                 count += 1

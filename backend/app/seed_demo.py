@@ -103,7 +103,11 @@ def main() -> None:
                         entry_time=entry,
                         exit_time=exit_,
                         worked_minutes=int((exit_ - entry).total_seconds() / 60),
-                        status="present",
+                        # "complete" is what ZenHR's missing_status actually
+                        # returns for a worked day. The seeder used to write
+                        # "present", a value real data never produces - which
+                        # is how a days-present bug survived local testing.
+                        status="complete",
                     )
                 )
 

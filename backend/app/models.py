@@ -171,9 +171,11 @@ class AttendanceRecord(Base):
     exit_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     worked_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # e.g. "present", "absent", "business_mission", "personal_excuse",
-    # "uncompleted_shift", "unpaid_leave" - kept as a free string so new
-    # ZenHR absence reasons don't require a migration.
+    # ZenHR's missing_status verbatim: "complete" for a fully worked day,
+    # plus an open-ended set of absence reasons (business_mission,
+    # personal_excuse, uncompleted_shift, unpaid_leave, ...). Kept as a free
+    # string so new reasons need no migration - and never compared against a
+    # hardcoded value: presence is derived from entry_time, see metrics.py.
     status: Mapped[str] = mapped_column(String)
     note: Mapped[str | None] = mapped_column(String, nullable=True)
 
