@@ -347,12 +347,19 @@ def sync_visits(db: Session, created_from: str, created_to: str) -> SyncRun:
         count = 0
         offset = 0
         limit = 200
+        unmatched_owners: dict[str, int] = {}
         while True:
             visits = bricks_client.list_visits(created_from, created_to, limit=limit, offset=offset)
             for visit in visits:
                 owner_id = visit["owner_id"]
                 owner_name = visit["owner"]["name"]
                 employee = by_bricks_id.get(owner_id) or by_name.get(_normalize(owner_name))
+                if not employee:
+                    # Synced, but owned by nobody we know: the rep's name in
+                    # Bricks doesn't match their ZenHR name. The visit lands
+                    # in the DB and the run still reports success, yet that
+                    # person's visit count stays 0 - so say so loudly.
+                    unmatched_owners[owner_name] = unmatched_owners.get(owner_name, 0) + 1
                 if employee and not employee.bricks_user_id:
                     employee.bricks_user_id = owner_id
                     by_bricks_id[owner_id] = employee
@@ -376,6 +383,24 @@ def sync_visits(db: Session, created_from: str, created_to: str) -> SyncRun:
             if len(visits) < limit:
                 break
             offset += limit
+
+        if unmatched_owners:
+            total_unmatched = sum(unmatched_owners.values())
+            logger.warning(
+                "sync_visits: %d of %d visit(s) matched no employee - these Bricks names have no "
+                "ZenHR counterpart, add a name override in Settings for each: %s",
+                total_unmatched,
+                count,
+                sorted(unmatched_owners.items(), key=lambda kv: -kv[1]),
+            )
+            if total_unmatched == count:
+                raise RuntimeError(
+                    f"Synced {count} visit(s) but none matched an employee - every Bricks rep name "
+                    f"is unknown to ZenHR, so all visit counts would stay 0. Add a name override in "
+                    f"Settings for: {', '.join(sorted(unmatched_owners)[:10])}"
+                )
+        else:
+            logger.info("sync_visits: %d visit(s), all matched to an employee", count)
         return count
 
     return _run(db, SyncSource.BRICKS, _do)
