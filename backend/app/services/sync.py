@@ -160,8 +160,11 @@ def sync_professional_data(db: Session, request_delay_s: float = 0.3) -> SyncRun
     next sync instead of being frozen out by whatever was assigned first."""
 
     def _do() -> int:
-        category_by_department = {r.department: r.category for r in db.query(DepartmentCategoryRule).all()}
-        category_by_role = {r.job_role: r.category for r in db.query(JobRoleCategoryRule).all()}
+        # Keyed on the normalized string: ZenHR job titles are free text, so
+        # "Delivery agent" and "Delivery Agent" are the same role and an
+        # admin shouldn't have to add a rule for every capitalization.
+        category_by_department = {_normalize(r.department): r.category for r in db.query(DepartmentCategoryRule).all()}
+        category_by_role = {_normalize(r.job_role): r.category for r in db.query(JobRoleCategoryRule).all()}
 
         count = 0
         for branch in zenhr_client.list_branches(db):
@@ -181,8 +184,8 @@ def sync_professional_data(db: Session, request_delay_s: float = 0.3) -> SyncRun
                 employee.manager_name = manager.get("name")
                 employee.manager_zenhr_id = manager.get("id")
 
-                dept_category = category_by_department.get(department) if department else None
-                role_category = category_by_role.get(job_title) if job_title else None
+                dept_category = category_by_department.get(_normalize(department)) if department else None
+                role_category = category_by_role.get(_normalize(job_title)) if job_title else None
 
                 # An explicit EXCLUDED rule wins over everything else.
                 # "Never show this person" is a stronger statement than a
@@ -213,7 +216,11 @@ def sync_shifts(db: Session) -> SyncRun:
         today = datetime.utcnow().date()
         for branch in zenhr_client.list_branches(db):
             work_shift_off_days = {
-                ws["id"]: [zenhr_client.zenhr_weekday_to_iso(d) for d in ws.get("days_off", [])]
+                ws["id"]: [
+                    iso
+                    for iso in (zenhr_client.zenhr_weekday_to_iso(d) for d in ws.get("days_off", []))
+                    if iso is not None
+                ]
                 for ws in zenhr_client.list_work_shifts(db, branch["id"])
             }
 

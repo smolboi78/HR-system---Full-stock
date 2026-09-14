@@ -139,7 +139,7 @@ def get_employee_profile(
             status=t.status,
             notes=t.notes,
             type_name=t.timeoff_type.name if t.timeoff_type else None,
-            is_vacation=bool(t.timeoff_type and t.timeoff_type.class_name == "AnnualVacation"),
+            is_vacation=bool(t.timeoff_type and t.timeoff_type.is_vacation),
         )
         for t in timeoff_rows
     ]

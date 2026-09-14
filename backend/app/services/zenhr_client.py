@@ -235,10 +235,36 @@ def list_work_shifts(db: Session, branch_id: int) -> list[dict]:
     return _fetch_all_pages(db, f"/api/v3/branches/{branch_id}/work_shifts", {})
 
 
-def zenhr_weekday_to_iso(zenhr_day: str | int) -> int:
+_WEEKDAY_NAME_TO_ISO = {
+    "monday": 1,
+    "tuesday": 2,
+    "wednesday": 3,
+    "thursday": 4,
+    "friday": 5,
+    "saturday": 6,
+    "sunday": 7,
+}
+
+
+def zenhr_weekday_to_iso(zenhr_day: str | int) -> int | None:
     """ZenHR: 0=Sunday..6=Saturday (Ruby Date#wday convention, confirmed by
     a Fri/Sat weekend showing up as ["5","6"]). ISO weekday: 1=Monday..
     7=Sunday. Only Sunday (0) actually moves; 1-6 (Mon-Sat) are identical
-    in both systems."""
-    day = int(zenhr_day)
+    in both systems.
+
+    The shift-write endpoints echo day *names* ("friday") rather than
+    numbers, so both forms are accepted. Anything unrecognized returns None
+    instead of raising: one odd value would otherwise abort the whole
+    branch's shift sync and leave every employee with no days off, which
+    silently inflates expected working days for everyone."""
+    if isinstance(zenhr_day, str):
+        named = _WEEKDAY_NAME_TO_ISO.get(zenhr_day.strip().lower())
+        if named is not None:
+            return named
+    try:
+        day = int(zenhr_day)
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= day <= 6:
+        return None
     return 7 if day == 0 else day

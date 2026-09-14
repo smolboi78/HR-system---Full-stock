@@ -203,10 +203,21 @@ class TimeoffType(Base):
     class_name: Mapped[str] = mapped_column(String)
     is_sick_vacation: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    @property
+    def is_vacation(self) -> bool:
+        """ZenHR ships several vacation class_names - AnnualVacation,
+        BalancedVacation and a plain Vacation all appear in real data -
+        against Leave for everything else. Matching only "AnnualVacation"
+        mislabels the other two as leave."""
+        return "vacation" in (self.class_name or "").lower()
 
-# Statuses that count as a protected day off (don't count as absence).
-# UNCONFIRMED exact spelling ZenHR uses - see docs/api-endpoint-mapping.md.
-PROTECTED_TIMEOFF_STATUSES = {"approved", "added_by_hr", "added by hr"}
+
+# Timeoff statuses meaning the leave did NOT happen, so the day still counts
+# as an expected working day. Deliberately a denylist of the values ZenHR is
+# confirmed to return, not an allowlist of approved-ish ones: the spelling of
+# the granted state varies, and guessing it wrong silently turns every
+# approved vacation day into an absence.
+VOID_TIMEOFF_STATUSES = {"cancelled", "canceled", "rejected", "withdrawn", "pending"}
 
 
 class TimeoffTransaction(Base):

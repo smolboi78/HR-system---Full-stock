@@ -31,7 +31,11 @@ def list_visits(
     created_to: str,
     limit: int = 200,
     offset: int = 0,
-    include_planned: bool = False,
+    # Bricks defaults this to false, which returns ONLY ad-hoc visits. A
+    # field team that plans its routes would sync almost nothing, so pull
+    # both and let the dashboard decide what to count (is_planned is stored
+    # per visit).
+    include_planned: bool = True,
 ) -> list[dict]:
     resp = _post(
         "/api/v1/visits/list",

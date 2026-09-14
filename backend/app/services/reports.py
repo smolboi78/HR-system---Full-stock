@@ -128,7 +128,7 @@ def employee_report_pdf(db: Session, employee: Employee, start: date, end: date)
 def joint_report_rows(db: Session, start: date, end: date) -> list[dict]:
     employees = (
         db.query(Employee)
-        .filter(Employee.category != EmployeeCategory.EXCLUDED)
+        .filter(Employee.category != EmployeeCategory.EXCLUDED, Employee.active.is_(True))
         .order_by(Employee.display_name)
         .all()
     )

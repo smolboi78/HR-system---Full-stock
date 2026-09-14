@@ -203,11 +203,42 @@ read:attendance_transaction read:timeoff read:timeoff_transaction
 read:employee_shift read:work_shift read:organization_level` (the last one
 added for #8, departments).
 
+## Lessons from the first real sync
+
+The first run against live data exposed a class of bug the demo seeder hid:
+code comparing against a literal value that only the seeder ever produced.
+Three of these shipped, all now fixed - and the shape of the mistake is
+worth remembering when adding anything new here.
+
+- **Never derive presence from `missing_status`.** It's free text
+  (`"complete"` for a worked day, plus an open-ended set of absence
+  reasons). `metrics.py` counted `status == "present"` - a value only the
+  seeder wrote - so every real employee scored 0 days present while hours
+  computed fine. Presence now comes from `entry_time` being set.
+- **Timeoff status is a denylist, not an allowlist.** Real values seen:
+  `cancelled`, `rejected`, `withdrawn`. The granted state's spelling is
+  still unknown, so `models.VOID_TIMEOFF_STATUSES` lists the ones meaning
+  "this leave didn't happen" and everything else counts as genuine leave.
+  Guessing the approved spelling (the old `PROTECTED_TIMEOFF_STATUSES`
+  guessed `"approved"`/`"added_by_hr"`, taken from the *salaries* endpoint)
+  turned approved vacation into absence.
+- **Bricks `include_planned` defaults to false.** That returns only ad-hoc
+  visits; a team that plans its routes syncs nothing. `bricks_client` now
+  passes `true` and the dashboard counts planned and unplanned alike.
+- Vacation is not just `class_name == "AnnualVacation"` - `BalancedVacation`
+  and a plain `Vacation` are also real (see `TimeoffType.is_vacation`).
+- Category rules match on a normalized (case/whitespace-insensitive) string,
+  since ZenHR job titles are free text - `"Delivery agent"` and
+  `"Delivery Agent"` are the same role.
+
 ## What's still genuinely open
 
-- Exact `missing_status` values beyond `"complete"` (attendance).
-- Exact timeoff `status` values beyond `"cancelled"`/`"withdrawn"` (affects
-  which count as a protected day off).
+- The exact spelling of the *granted* timeoff status (handled by the
+  denylist above, so it doesn't block anything).
+- Whether the `work_shifts` list endpoint can return weekday *names*
+  (`"friday"`) rather than numbers - the write endpoints do, so
+  `zenhr_weekday_to_iso` accepts both and returns `None` for anything else
+  rather than aborting a whole branch's shift sync.
 - Whether `professional_data` 404s for any employee who's never had one set
   (handled gracefully - `get_employee_active_professional_data` returns
   `None` and that employee just keeps whatever job title/department/manager
