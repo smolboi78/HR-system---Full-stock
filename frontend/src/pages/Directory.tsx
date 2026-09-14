@@ -23,19 +23,14 @@ export default function Directory() {
     queryFn: () => api.get<Department[]>("/employees/departments"),
   });
 
-  // Department tabs come from ZenHR's own department list (synced
-  // separately, see sync_departments()) rather than being derived from
-  // whatever distinct department strings happen to appear on synced
-  // employees - so a department shows up in ZenHR's own name even before
-  // anyone in it has synced. Any stray department string that shows up on
-  // an employee but isn't in that canonical list (shouldn't normally
-  // happen - same sync source) still gets a tab, just appended.
+  // Department tabs come straight from ZenHR's own department list
+  // (synced separately, see sync_departments()) - not from whatever
+  // distinct department strings happen to appear on synced employees. A
+  // department shows up, in ZenHR's own name, even before anyone in it
+  // has synced.
   const departments = useMemo(() => {
-    const canonical = (canonicalDepartments ?? []).map((d) => d.name);
-    const fromEmployees = (employees ?? []).map((e) => e.department).filter((d): d is string => !!d);
-    const set = new Set([...canonical, ...fromEmployees]);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [canonicalDepartments, employees]);
+    return (canonicalDepartments ?? []).map((d) => d.name).sort((a, b) => a.localeCompare(b));
+  }, [canonicalDepartments]);
 
   const filtered = useMemo(() => {
     if (!employees) return [];
