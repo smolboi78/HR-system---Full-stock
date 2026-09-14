@@ -7,7 +7,6 @@ from app.db import get_db
 from app.deps import get_current_user, require_admin
 from app.models import (
     AttendanceRecord,
-    Department,
     Employee,
     EmployeeCategory,
     TimeoffTransaction,
@@ -21,6 +20,7 @@ from app.schemas import (
     TimeoffTransactionOut,
     VacationBalanceRequest,
 )
+from app.services import org_chart
 from app.services.metrics import compute_period_summary
 
 router = APIRouter(prefix="/api/employees", tags=["employees"])
@@ -71,6 +71,7 @@ def list_employees(
                 category=emp.category,
                 photo_url=emp.photo_url,
                 active=emp.active,
+                org_group=org_chart.group_for(emp.department, emp.job_title),
                 period_hours=summary.hours,
                 period_visits=summary.visits,
                 period_days_present=summary.days_present,
@@ -84,12 +85,18 @@ def list_employees(
 def list_departments(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> list[Department]:
-    """The company's canonical department list, synced straight from
-    ZenHR - not derived from whatever distinct Employee.department strings
-    happen to be present, so a department shows up (in ZenHR's own name)
-    even before anyone in it has synced."""
-    return db.query(Department).order_by(Department.name).all()
+) -> list[DepartmentOut]:
+    """The directory's department tabs: Full Stock's six org-chart groups,
+    in the chart's own order (not alphabetical, not ZenHR's wordier raw
+    department names). An employee's group is derived per-request from
+    their role/department - see services/org_chart - so this needs no sync
+    of its own and no group can go missing just because nobody in it has
+    been categorized yet.
+
+    ZenHR's raw department list is still synced into the Department table;
+    it's just not what the directory groups people by.
+    """
+    return [DepartmentOut(id=name, name=name) for name in org_chart.ORG_GROUPS]
 
 
 def _get_employee_or_404(db: Session, employee_id: str) -> Employee:

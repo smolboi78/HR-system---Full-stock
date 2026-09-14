@@ -29,6 +29,7 @@ export interface EmployeeCard {
   category: EmployeeCategory;
   photo_url: string | null;
   active: boolean;
+  org_group: string;
   period_hours: number | null;
   period_visits: number | null;
   period_days_present: number | null;

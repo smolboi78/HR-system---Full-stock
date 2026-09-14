@@ -64,6 +64,9 @@ class EmployeeCardOut(BaseModel):
     category: str
     photo_url: str | None
     active: bool
+    # Which org-chart group this person belongs to - drives the directory's
+    # department tabs. Derived from role/department, see services/org_chart.
+    org_group: str = ""
     period_hours: float | None = None
     period_visits: int | None = None
     period_days_present: int | None = None

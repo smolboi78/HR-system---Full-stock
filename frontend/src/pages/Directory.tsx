@@ -18,24 +18,27 @@ export default function Directory() {
     queryFn: () => api.get<EmployeeCardType[]>(`/employees?period_start=${period.start}&period_end=${period.end}`),
   });
 
-  const { data: canonicalDepartments } = useQuery({
+  const { data: orgGroups } = useQuery({
     queryKey: ["departments"],
     queryFn: () => api.get<Department[]>("/employees/departments"),
   });
 
-  // Department tabs come straight from ZenHR's own department list
-  // (synced separately, see sync_departments()) - not from whatever
-  // distinct department strings happen to appear on synced employees. A
-  // department shows up, in ZenHR's own name, even before anyone in it
-  // has synced.
+  // Tabs are Full Stock's six org-chart groups, served in the chart's own
+  // order - deliberately not sorted, and not ZenHR's raw department names.
+  // Anyone whose role/department doesn't map to a group gets a trailing
+  // tab of their own rather than silently disappearing from the directory.
   const departments = useMemo(() => {
-    return (canonicalDepartments ?? []).map((d) => d.name).sort((a, b) => a.localeCompare(b));
-  }, [canonicalDepartments]);
+    const groups = (orgGroups ?? []).map((d) => d.name);
+    const leftovers = (employees ?? [])
+      .map((e) => e.org_group)
+      .filter((g) => g && !groups.includes(g));
+    return [...groups, ...Array.from(new Set(leftovers))];
+  }, [orgGroups, employees]);
 
   const filtered = useMemo(() => {
     if (!employees) return [];
     return employees.filter((e) => {
-      if (department !== ALL_DEPARTMENTS && e.department !== department) return false;
+      if (department !== ALL_DEPARTMENTS && e.org_group !== department) return false;
       if (search && !e.display_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
