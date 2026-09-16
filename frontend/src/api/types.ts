@@ -123,6 +123,13 @@ export interface NameOverride {
   note: string | null;
 }
 
+export interface UnmatchedRep {
+  owner_bricks_id: string;
+  owner_name_raw: string;
+  visit_count: number;
+  last_visit_at: string;
+}
+
 export interface SyncRun {
   id: string;
   source: "ZENHR" | "BRICKS";

@@ -9,6 +9,7 @@ import type {
   Holiday,
   NameOverride,
   SyncRun,
+  UnmatchedRep,
   User,
 } from "../api/types";
 import { CATEGORY_LABEL } from "../lib/category";
@@ -311,6 +312,92 @@ function DepartmentRulesSection() {
   );
 }
 
+function UnmatchedRepsSection() {
+  const qc = useQueryClient();
+  const { data: reps } = useQuery({
+    queryKey: ["unmatched-reps"],
+    queryFn: () => api.get<UnmatchedRep[]>("/settings/unmatched-reps"),
+  });
+  const { data: employees } = useQuery({
+    queryKey: ["employee-overrides"],
+    queryFn: () => api.get<EmployeeOverride[]>("/settings/employee-overrides"),
+  });
+  const [picks, setPicks] = useState<Record<string, string>>({});
+
+  const link = useMutation({
+    mutationFn: (rep: UnmatchedRep) =>
+      api.post("/settings/unmatched-reps/link", {
+        owner_bricks_id: rep.owner_bricks_id,
+        employee_id: picks[rep.owner_bricks_id],
+      }),
+    onSuccess: () => {
+      // The rep leaves this list and their visits land on the employee, so
+      // the directory and every profile need refetching too.
+      qc.invalidateQueries({ queryKey: ["unmatched-reps"] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
+      qc.invalidateQueries({ queryKey: ["employee"] });
+    },
+  });
+
+  const totalStranded = (reps ?? []).reduce((sum, r) => sum + r.visit_count, 0);
+
+  return (
+    <Section
+      title="Unlinked Bricks reps"
+      description="Bricks accounts whose visits match nobody in ZenHR. Their visits are already synced — they just aren't counted against anyone until you link them here."
+    >
+      {reps?.length === 0 && (
+        <p className="text-sm text-muted">Every synced visit is linked to an employee.</p>
+      )}
+
+      {reps && reps.length > 0 && (
+        <p className="text-xs text-amber-700">
+          {totalStranded} visit{totalStranded === 1 ? "" : "s"} across {reps.length} account
+          {reps.length === 1 ? "" : "s"} aren't counted against anyone.
+        </p>
+      )}
+
+      <div className="divide-y divide-line/70">
+        {reps?.map((rep) => (
+          <div key={rep.owner_bricks_id} className="py-3 flex items-center gap-3 flex-wrap">
+            <div className="flex-1 min-w-[12rem]">
+              <div className="text-sm font-medium">{rep.owner_name_raw}</div>
+              <div className="text-xs text-muted mt-0.5">
+                {rep.visit_count} visit{rep.visit_count === 1 ? "" : "s"} · last{" "}
+                {new Date(rep.last_visit_at).toLocaleDateString()}
+              </div>
+            </div>
+            <select
+              value={picks[rep.owner_bricks_id] ?? ""}
+              onChange={(e) => setPicks((p) => ({ ...p, [rep.owner_bricks_id]: e.target.value }))}
+              className="text-sm border border-line rounded-lg px-2 py-1.5 bg-white min-w-[14rem]"
+            >
+              <option value="">Link to employee…</option>
+              {employees?.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.display_name}
+                  {emp.effective_job_title ? ` — ${emp.effective_job_title}` : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              disabled={!picks[rep.owner_bricks_id] || link.isPending}
+              onClick={() => link.mutate(rep)}
+              className="text-sm bg-ink text-paper rounded-lg px-3 py-1.5 disabled:opacity-40"
+            >
+              Link
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {link.isError && (
+        <p className="text-sm text-red-600">Couldn't link that account — {(link.error as Error).message}</p>
+      )}
+    </Section>
+  );
+}
+
 function NameOverridesSection() {
   const qc = useQueryClient();
   const { data: overrides } = useQuery({ queryKey: ["name-overrides"], queryFn: () => api.get<NameOverride[]>("/settings/name-overrides") });
@@ -514,6 +601,7 @@ export default function Settings() {
       </div>
       <ZenhrConnectBanner />
       <SyncSection />
+      <UnmatchedRepsSection />
       <EmployeeOverridesSection />
       <HolidaysSection />
       <DepartmentRulesSection />

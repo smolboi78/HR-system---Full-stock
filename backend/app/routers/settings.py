@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -10,6 +11,7 @@ from app.models import (
     Holiday,
     JobRoleCategoryRule,
     User,
+    Visit,
 )
 from app.schemas import (
     CategoryRuleOut,
@@ -20,8 +22,10 @@ from app.schemas import (
     EmployeeOverrideRequest,
     HolidayCreateRequest,
     HolidayOut,
+    LinkRepRequest,
     NameOverrideOut,
     NameOverrideRequest,
+    UnmatchedRepOut,
     UserCreateRequest,
     UserOut,
     UserUpdateRequest,
@@ -221,6 +225,67 @@ def delete_name_override(override_id: str, db: Session = Depends(get_db), _: Use
     db.delete(override)
     db.commit()
     return {"ok": True}
+
+
+# ---------- Unlinked Bricks reps ----------
+
+
+@router.get("/unmatched-reps", response_model=list[UnmatchedRepOut])
+def list_unmatched_reps(db: Session = Depends(get_db), _: User = Depends(require_admin)) -> list[UnmatchedRepOut]:
+    rows = (
+        db.query(
+            Visit.owner_bricks_id.label("owner_bricks_id"),
+            func.max(Visit.owner_name_raw).label("owner_name_raw"),
+            func.count(Visit.id).label("visit_count"),
+            func.max(Visit.visit_time).label("last_visit_at"),
+        )
+        .filter(Visit.employee_id.is_(None))
+        .group_by(Visit.owner_bricks_id)
+        .order_by(func.count(Visit.id).desc())
+        .all()
+    )
+    return [
+        UnmatchedRepOut(
+            owner_bricks_id=r.owner_bricks_id,
+            # Bricks names arrive with stray leading/trailing spaces.
+            owner_name_raw=(r.owner_name_raw or "").strip() or "(unnamed Bricks account)",
+            visit_count=r.visit_count,
+            last_visit_at=r.last_visit_at,
+        )
+        for r in rows
+    ]
+
+
+@router.post("/unmatched-reps/link")
+def link_unmatched_rep(
+    payload: LinkRepRequest, db: Session = Depends(get_db), _: User = Depends(require_admin)
+) -> dict:
+    """Attach a Bricks account to an employee by its stable owner id.
+
+    Pinning bricks_user_id rather than adding a name override means future
+    syncs match on the id and stop depending on how the name is spelled.
+    """
+    employee = db.get(Employee, payload.employee_id)
+    if not employee:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+
+    # One Bricks account belongs to one person - take it off whoever holds it.
+    for other in db.query(Employee).filter(
+        Employee.bricks_user_id == payload.owner_bricks_id, Employee.id != employee.id
+    ):
+        other.bricks_user_id = None
+
+    employee.bricks_user_id = payload.owner_bricks_id
+
+    # Reassign every visit from that account, not only the unattached ones, so
+    # re-linking corrects a wrong mapping instead of stranding its visits.
+    linked = (
+        db.query(Visit)
+        .filter(Visit.owner_bricks_id == payload.owner_bricks_id)
+        .update({Visit.employee_id: employee.id}, synchronize_session=False)
+    )
+    db.commit()
+    return {"linked_visits": linked, "employee_id": employee.id, "display_name": employee.display_name}
 
 
 # ---------- Users (admin/view-only accounts) ----------

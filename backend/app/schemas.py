@@ -212,6 +212,21 @@ class NameOverrideRequest(BaseModel):
     note: str | None = None
 
 
+class UnmatchedRepOut(BaseModel):
+    """A Bricks account whose visits belong to nobody in ZenHR. Until it is
+    linked, those visits sit in the database and every card reads 0."""
+
+    owner_bricks_id: str
+    owner_name_raw: str
+    visit_count: int
+    last_visit_at: datetime
+
+
+class LinkRepRequest(BaseModel):
+    owner_bricks_id: str
+    employee_id: str
+
+
 class SyncRunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
