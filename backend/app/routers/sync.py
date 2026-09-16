@@ -58,6 +58,34 @@ def cron_sync(request: Request, db: Session = Depends(get_db)):
     return run_full_sync(db)
 
 
+@router.post("/probe-balances")
+def probe_balances(db: Session = Depends(get_db), _: User = Depends(require_admin)) -> dict:
+    """Ask ZenHR directly whether a vacation-balance endpoint exists.
+
+    Its published Postman collection documents none, so rather than guess we
+    try the plausible paths against a real branch and employee and report what
+    each returns. Read-only.
+    """
+    from app.models import Employee
+
+    employee = (
+        db.query(Employee)
+        .filter(Employee.active.is_(True), Employee.zenhr_branch_id.isnot(None))
+        .order_by(Employee.display_name)
+        .first()
+    )
+    if not employee:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "No synced employee to probe with - run a sync first."
+        )
+
+    results = zenhr_client.probe_balance_endpoints(db, employee.zenhr_branch_id, employee.zenhr_employee_id)
+    return {
+        "probed_with": {"employee": employee.display_name, "branch_id": employee.zenhr_branch_id},
+        "results": results,
+    }
+
+
 @router.get("/runs", response_model=list[SyncRunOut])
 def list_sync_runs(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     from app.models import SyncRun

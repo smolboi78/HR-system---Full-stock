@@ -8,6 +8,7 @@ import type {
   EmployeeOverride,
   Holiday,
   NameOverride,
+  ProbeResult,
   SyncRun,
   UnmatchedRep,
   UnsortedEmployee,
@@ -695,6 +696,62 @@ function UsersSection() {
   );
 }
 
+// ZenHR's published API docs list no vacation-balance endpoint, so rather
+// than guess at one we ask ZenHR directly and show exactly what it answers.
+function ProbeBalances() {
+  const probe = useMutation({
+    mutationFn: () => api.post<ProbeResult>("/sync/probe-balances"),
+  });
+
+  return (
+    <div className="border-t border-line/70 pt-3 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => probe.mutate()}
+          disabled={probe.isPending}
+          className="text-sm border border-line rounded-lg px-3 py-1.5 hover:border-ink/30 transition-colors disabled:opacity-40"
+        >
+          {probe.isPending ? "Checking…" : "Check for vacation-balance API"}
+        </button>
+        <span className="text-xs text-muted">
+          Asks ZenHR whether a balance endpoint exists. Read-only — changes nothing.
+        </span>
+      </div>
+
+      {probe.isError && (
+        <p className="text-sm text-red-600">Couldn't probe — {(probe.error as Error).message}</p>
+      )}
+
+      {probe.data && (
+        <div className="space-y-1">
+          <p className="text-xs text-muted">
+            Probed as {probe.data.probed_with.employee} (branch {probe.data.probed_with.branch_id}). 404 = no such
+            endpoint · 403 = exists but needs a scope · 200 = usable.
+          </p>
+          <div className="font-mono text-[11px] divide-y divide-line/70">
+            {probe.data.results.map((r) => (
+              <div key={r.path} className="py-1 flex items-start gap-2">
+                <span
+                  className={
+                    r.status === 200
+                      ? "text-green-700 font-semibold w-10"
+                      : r.status === 403
+                        ? "text-amber-700 font-semibold w-10"
+                        : "text-muted w-10"
+                  }
+                >
+                  {r.status ?? "err"}
+                </span>
+                <span className="flex-1 break-all">{r.path}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SyncSection() {
   const qc = useQueryClient();
   const { data: runs } = useQuery({ queryKey: ["sync-runs"], queryFn: () => api.get<SyncRun[]>("/sync/runs") });
@@ -725,6 +782,8 @@ function SyncSection() {
         Do this once (or again if the connection is ever revoked) before using "Sync now".
       </p>
       {runSync.isError && <p className="text-sm text-red-600">Sync failed — see the run log below.</p>}
+
+      <ProbeBalances />
       <div className="max-h-64 overflow-y-auto divide-y divide-line/70">
         {runs?.map((r) => (
           <div key={r.id} className="py-2 text-sm flex items-center justify-between">

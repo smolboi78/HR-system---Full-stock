@@ -136,6 +136,51 @@ def _get(db: Session, path: str, params: dict[str, Any] | None = None) -> httpx.
     return resp
 
 
+# Candidate paths for a vacation-balance endpoint, which ZenHR's published
+# Postman collection does not document. {b} is a branch id, {e} an employee
+# id. Names follow ZenHR's own v3 conventions (plural resource, snake_case).
+BALANCE_ENDPOINT_CANDIDATES = [
+    "/api/v3/branches/{b}/employees/{e}/timeoff_balances",
+    "/api/v3/branches/{b}/employees/{e}/vacation_balances",
+    "/api/v3/branches/{b}/employees/{e}/balances",
+    "/api/v3/branches/{b}/employees/{e}/timeoffs",
+    "/api/v3/branches/{b}/timeoff_balances",
+    "/api/v3/branches/{b}/vacation_balances",
+    "/api/v3/branches/{b}/employees/{e}/timeoff_transactions",
+]
+
+
+def probe_balance_endpoints(db: Session, branch_id: int, employee_id: int) -> list[dict]:
+    """GET each candidate and report what came back, without raising.
+
+    The status is the answer: 404 means no such endpoint, 403 means it exists
+    but the token lacks the scope (so the scope name is worth finding), and
+    200 means we can read balances after all. Read-only - it writes nothing.
+    """
+    token = _get_valid_access_token(db)
+    results = []
+    for template in BALANCE_ENDPOINT_CANDIDATES:
+        path = template.format(b=branch_id, e=employee_id)
+        try:
+            resp = httpx.get(
+                f"{_api_origin()}{path}",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=20,
+            )
+            results.append(
+                {
+                    "path": path,
+                    "status": resp.status_code,
+                    # Enough to recognise the shape without dumping a payload.
+                    "body": resp.text[:400],
+                }
+            )
+        except Exception as err:  # noqa: BLE001 - a probe reports failures, it doesn't raise
+            results.append({"path": path, "status": None, "body": f"{type(err).__name__}: {err}"})
+        time.sleep(0.35)  # stay under ZenHR's 15 requests / 4s limit
+    return results
+
+
 def _fetch_all_pages(db: Session, path: str, params: dict[str, Any], page_delay_s: float = 0.3) -> list[dict]:
     all_rows: list[dict] = []
     page = 1

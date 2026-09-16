@@ -157,3 +157,8 @@ export interface SyncRun {
   records_synced: number;
   error_message: string | null;
 }
+
+export interface ProbeResult {
+  probed_with: { employee: string; branch_id: number };
+  results: { path: string; status: number | null; body: string }[];
+}
