@@ -22,7 +22,11 @@ def _headers() -> dict[str, str]:
 def _post(path: str, body: dict[str, Any]) -> Any:
     settings = get_settings()
     resp = httpx.post(f"{settings.bricks_base_url}{path}", json=body, headers=_headers(), timeout=30)
-    resp.raise_for_status()
+    if resp.is_error:
+        # Bricks is a Goa service: the reason a request was rejected is in the
+        # response body, which httpx's own raise_for_status() message drops.
+        # Without it the sync log reads "400 Bad Request" and says nothing.
+        raise RuntimeError(f"Bricks {path} failed ({resp.status_code}): {resp.text[:500]}")
     return resp.json()
 
 

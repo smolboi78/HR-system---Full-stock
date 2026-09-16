@@ -412,7 +412,8 @@ DEFAULT_SYNC_WINDOW_DAYS = 10
 def run_full_sync(db: Session) -> list[SyncRun]:
     """Runs the same trailing window every time (not just "today") so late
     punches, corrections, or a missed scheduled run still get picked up."""
-    to = datetime.utcnow().date()
+    now = datetime.utcnow().replace(microsecond=0)
+    to = now.date()
     frm = to - timedelta(days=DEFAULT_SYNC_WINDOW_DAYS)
     runs = [
         sync_employees(db),
@@ -422,8 +423,19 @@ def run_full_sync(db: Session) -> list[SyncRun]:
         sync_attendance(db, frm.isoformat(), to.isoformat()),
         sync_timeoffs(db, frm.isoformat(), to.isoformat()),
     ]
+    # ZenHR filters on plain dates, but Bricks declares created_from/created_to
+    # as RFC3339 date-times - a bare "2026-09-16" is not one. The upper bound is
+    # now rather than midnight, or today's visits fall outside the window.
     try:
-        runs.append(sync_visits(db, frm.isoformat(), to.isoformat()))
-    except RuntimeError:
-        pass  # BRICKS_API_KEY not configured yet - ZenHR sync still ran
+        runs.append(
+            sync_visits(
+                db,
+                datetime.combine(frm, datetime.min.time()).isoformat() + "Z",
+                now.isoformat() + "Z",
+            )
+        )
+    except Exception:
+        # Already recorded on the SyncRun row and shown red in Settings ->
+        # Data sync; don't sink the ZenHR results that just committed.
+        pass
     return runs
