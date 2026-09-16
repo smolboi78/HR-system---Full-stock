@@ -7,7 +7,14 @@ from datetime import date
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import EmployeeCategory, Holiday, JobRoleCategoryRule, User, UserRole
+from app.models import (
+    EmployeeCategory,
+    EmployeeNameOverride,
+    Holiday,
+    JobRoleCategoryRule,
+    User,
+    UserRole,
+)
 from app.security import hash_password
 
 # Fixed-date holidays are confirmed by Egypt's official calendar. Islamic
@@ -66,6 +73,21 @@ STARTER_CATEGORY_RULES = {
 }
 
 
+# Reps whose Bricks account name differs from their ZenHR name, confirmed
+# against the seven accounts the first live visits sync could not match.
+# Stored trimmed: Bricks sends some of these with stray leading/trailing
+# spaces, and matching normalizes whitespace on both sides anyway.
+BRICKS_NAME_MAPPINGS: list[tuple[str, str, str]] = [
+    ("115", "Kareem Elsobky", "Karim Ahmed"),
+    ("119", "Mohamed Abdelrazek", "Mohamed Mohamed"),
+    ("127", "Kareim Helmy", "Karim Mohamed"),
+    ("135", "Amgad", "Abd Elrahman Elbannwy"),
+    ("136", "Amr Mostafa", "Amr Hasan"),
+    ("205", "Safaa Sabry", "Safaa Mohamed"),
+    ("212", "Abdullah Ibrahim Habashi", "Abduallah Habashi"),
+]
+
+
 def seed_holidays(db) -> None:
     for iso_date, name in EGYPT_HOLIDAYS_2026:
         existing = db.query(Holiday).filter_by(holiday_date=date.fromisoformat(iso_date)).first()
@@ -82,6 +104,20 @@ def seed_category_rules(db) -> None:
             existing.category = category
         else:
             db.add(JobRoleCategoryRule(job_role=job_role, category=category))
+
+
+def seed_name_overrides(db) -> None:
+    """Seed only what's missing: an admin who corrects a mapping in Settings
+    keeps their version."""
+    for employment_number, bricks_name, zenhr_name in BRICKS_NAME_MAPPINGS:
+        if not db.query(EmployeeNameOverride).filter_by(employment_number=employment_number).first():
+            db.add(
+                EmployeeNameOverride(
+                    employment_number=employment_number,
+                    bricks_display_name=bricks_name,
+                    note=f"ZenHR: {zenhr_name}",
+                )
+            )
 
 
 def seed_users(db) -> None:
@@ -103,6 +139,7 @@ def main() -> None:
         seed_users(db)
         seed_holidays(db)
         seed_category_rules(db)
+        seed_name_overrides(db)
         db.commit()
         print("Seed complete.")
     finally:
