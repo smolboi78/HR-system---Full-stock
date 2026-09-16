@@ -179,6 +179,8 @@ def _override_row(employee: Employee) -> EmployeeOverrideOut:
         effective_job_title=employee.effective_job_title,
         effective_org_group=org_chart.group_for_employee(employee),
         effective_org_section=org_chart.section_for_employee(employee),
+        category=employee.category,
+        track_attendance=employee.track_attendance,
     )
 
 
@@ -212,6 +214,8 @@ def set_employee_override(
     employee.job_title_override = (payload.job_title or "").strip() or None
     employee.org_group_override = group
     employee.org_section_override = section
+    if payload.track_attendance is not None:
+        employee.track_attendance = payload.track_attendance
     db.commit()
     db.refresh(employee)
     return _override_row(employee)
@@ -258,17 +262,28 @@ def delete_name_override(override_id: str, db: Session = Depends(get_db), _: Use
 
 @router.get("/unsorted-employees", response_model=list[UnsortedEmployeeOut])
 def list_unsorted_employees(
-    db: Session = Depends(get_db), _: User = Depends(require_admin)
+    excluded: bool = False,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
 ) -> list[UnsortedEmployeeOut]:
-    """Active employees no admin has placed yet. EXCLUDED people are left out
-    entirely - they never appear in the directory, so there is nothing to
-    sort them into and they would never let this list empty."""
+    """Active employees no admin has placed yet.
+
+    EXCLUDED people are kept out of the default list - they never appear in
+    the directory, so there is nothing to sort them into and they would stop
+    it ever emptying. `excluded=true` returns exactly those instead, which is
+    how someone like a director gets added for reference.
+    """
+    category_filter = (
+        Employee.category == EmployeeCategory.EXCLUDED
+        if excluded
+        else Employee.category != EmployeeCategory.EXCLUDED
+    )
     employees = (
         db.query(Employee)
         .filter(
             Employee.directory_confirmed.is_(False),
             Employee.active.is_(True),
-            Employee.category != EmployeeCategory.EXCLUDED,
+            category_filter,
         )
         .order_by(Employee.display_name)
         .all()

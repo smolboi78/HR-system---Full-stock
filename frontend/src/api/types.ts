@@ -32,6 +32,8 @@ export interface EmployeeOverride {
   effective_job_title: string | null;
   effective_org_group: string;
   effective_org_section: string | null;
+  category: EmployeeCategory;
+  track_attendance: boolean;
 }
 
 export interface UnsortedEmployee {
@@ -55,6 +57,7 @@ export interface EmployeeCard {
   active: boolean;
   org_group: string;
   org_section: string | null;
+  track_attendance: boolean;
   period_hours: number | null;
   period_visits: number | null;
   period_days_present: number | null;
@@ -102,6 +105,7 @@ export interface EmployeeProfile {
   // ZenHR has no vacation-balance endpoint (confirmed) - purely
   // admin-maintained, not synced.
   vacation_balance_days: number | null;
+  track_attendance: boolean;
 
   period_hours: number;
   period_visits: number;

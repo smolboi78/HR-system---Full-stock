@@ -55,9 +55,21 @@ export default function Profile() {
   if (isLoading) return <div className="text-muted text-sm py-12 text-center">Loading profile…</div>;
   if (error || !profile) return <div className="text-red-600 text-sm py-12 text-center">Couldn't load this employee.</div>;
 
-  const showHours = profile.category === "MANAGEMENT" || profile.category === "DELIVERY_AGENT";
+  // Someone listed for reference doesn't clock in, so hours and days
+  // present/absent say nothing about them - their time off is the point.
+  const tracksAttendance = profile.track_attendance;
+  const showHours =
+    tracksAttendance && (profile.category === "MANAGEMENT" || profile.category === "DELIVERY_AGENT");
   const showVisits =
     profile.category === "SALES" || profile.category === "COLLECTOR" || profile.category === "DELIVERY_AGENT";
+  const tabs: Tab[] = [
+    ...(tracksAttendance ? (["attendance"] as Tab[]) : []),
+    "timeoff",
+    ...(showVisits ? (["visits"] as Tab[]) : []),
+  ];
+  // The stored tab can be one this person doesn't have (the default is
+  // "attendance"), which would render an empty panel with no tab selected.
+  const activeTab = tabs.includes(tab) ? tab : tabs[0];
 
   return (
     <div className="space-y-6">
@@ -97,8 +109,18 @@ export default function Profile() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {showHours && <StatTile label="Hours worked" value={profile.period_hours} />}
         {showVisits && <StatTile label="Visits" value={profile.period_visits} />}
-        <StatTile label="Days present" value={`${profile.period_days_present}/${profile.period_days_expected}`} />
-        <StatTile label="Days absent" value={profile.period_days_absent} />
+        {tracksAttendance && (
+          <>
+            <StatTile
+              label="Days present"
+              value={`${profile.period_days_present}/${profile.period_days_expected}`}
+            />
+            <StatTile label="Days absent" value={profile.period_days_absent} />
+          </>
+        )}
+        {!tracksAttendance && (
+          <StatTile label="Days of time off" value={profile.timeoff.reduce((sum, t) => sum + t.amount, 0)} />
+        )}
       </div>
 
       <div className="bg-white border border-line rounded-xl p-5 flex items-center justify-between flex-wrap gap-4">
@@ -131,12 +153,12 @@ export default function Profile() {
 
       <div>
         <div className="flex items-center gap-1 border-b border-line">
-          {(["attendance", "timeoff", "visits"] as Tab[]).map((t) => (
+          {tabs.map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`px-4 py-2.5 text-sm -mb-px border-b-2 transition-colors ${
-                tab === t ? "border-ink text-ink font-medium" : "border-transparent text-muted hover:text-ink"
+                activeTab === t ? "border-ink text-ink font-medium" : "border-transparent text-muted hover:text-ink"
               }`}
             >
               {TAB_LABEL[t]}
@@ -145,7 +167,7 @@ export default function Profile() {
         </div>
 
         <div className="pt-4">
-          {tab === "attendance" && (
+          {activeTab === "attendance" && (
             <Table
               rows={profile.attendance}
               empty="No attendance records in this period."
@@ -159,7 +181,7 @@ export default function Profile() {
               ]}
             />
           )}
-          {tab === "timeoff" && (
+          {activeTab === "timeoff" && (
             <Table
               rows={profile.timeoff}
               empty="No leave or vacation transactions in this period."
@@ -173,7 +195,7 @@ export default function Profile() {
               ]}
             />
           )}
-          {tab === "visits" && (
+          {activeTab === "visits" && (
             <Table
               rows={profile.visits}
               empty="No visits in this period."

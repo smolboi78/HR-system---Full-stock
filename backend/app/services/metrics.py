@@ -117,10 +117,17 @@ def compute_period_summary(db: Session, employee: Employee, start: date, end: da
         .count()
     )
 
-    holidays = _holiday_dates(db, start, end)
-    timeoff_dates = _granted_timeoff_dates(db, employee, start, end)
-    days_expected = expected_working_days(employee, start, end, holidays, timeoff_dates)
-    days_absent = max(days_expected - days_present, 0)
+    if employee.track_attendance:
+        holidays = _holiday_dates(db, start, end)
+        timeoff_dates = _granted_timeoff_dates(db, employee, start, end)
+        days_expected = expected_working_days(employee, start, end, holidays, timeoff_dates)
+        days_absent = max(days_expected - days_present, 0)
+    else:
+        # Nobody expects them to clock in, so there are no days to be absent
+        # for. Counting them would score a director as absent every working
+        # day, here and in every report that reads this.
+        days_expected = 0
+        days_absent = 0
 
     return PeriodSummary(
         hours=round(hours, 2),

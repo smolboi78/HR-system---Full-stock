@@ -41,7 +41,7 @@ const AUTO_GROUP = "";
 function EmployeeOverridesSection() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, { title: string; group: string; section: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { title: string; group: string; section: string; track: boolean }>>({});
 
   const { data: rows } = useQuery({
     queryKey: ["employee-overrides"],
@@ -53,13 +53,16 @@ function EmployeeOverridesSection() {
   });
 
   const save = useMutation({
-    mutationFn: ({ id, title, group, section }: { id: string; title: string; group: string; section: string }) =>
+    mutationFn: ({
+      id, title, group, section, track,
+    }: { id: string; title: string; group: string; section: string; track: boolean }) =>
       // section must go with every save: omitting it would clear a placement
       // made in the unsorted-employees list.
       api.put(`/settings/employee-overrides/${id}`, {
         job_title: title,
         org_group: group,
         org_section: group ? section || null : null,
+        track_attendance: track,
       }),
     onSuccess: (_data, vars) => {
       setDrafts((d) => {
@@ -83,6 +86,7 @@ function EmployeeOverridesSection() {
       title: row.job_title_override ?? "",
       group: row.org_group_override ?? AUTO_GROUP,
       section: row.org_section_override ?? "",
+      track: row.track_attendance,
     };
 
   const isDirty = (row: EmployeeOverride) => {
@@ -91,7 +95,8 @@ function EmployeeOverridesSection() {
     return (
       d.title !== (row.job_title_override ?? "") ||
       d.group !== (row.org_group_override ?? AUTO_GROUP) ||
-      d.section !== (row.org_section_override ?? "")
+      d.section !== (row.org_section_override ?? "") ||
+      d.track !== row.track_attendance
     );
   };
 
@@ -159,10 +164,27 @@ function EmployeeOverridesSection() {
                     ))}
                   </select>
                 )}
+                <label
+                  className="flex items-center gap-1.5 text-xs text-muted whitespace-nowrap"
+                  title="Off for someone listed for reference who never clocks in — hides hours and days present/absent, and stops them counting as absent."
+                >
+                  <input
+                    type="checkbox"
+                    checked={draft.track}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [row.id]: { ...draft, track: e.target.checked } }))}
+                  />
+                  Tracks attendance
+                </label>
                 <button
                   disabled={!dirty || save.isPending}
                   onClick={() =>
-                    save.mutate({ id: row.id, title: draft.title, group: draft.group, section: draft.section })
+                    save.mutate({
+                      id: row.id,
+                      title: draft.title,
+                      group: draft.group,
+                      section: draft.section,
+                      track: draft.track,
+                    })
                   }
                   className="text-sm bg-ink text-paper rounded-lg px-3 py-1 disabled:opacity-40"
                 >
@@ -344,11 +366,15 @@ function DepartmentRulesSection() {
   );
 }
 
-function UnsortedEmployeesSection() {
+// `excluded` lists the people whose job title keeps them out of the
+// directory by default (founders, directors, office staff) so one can be
+// added for reference, instead of the ordinary roster waiting to be sorted.
+function UnsortedEmployeesSection({ excluded = false }: { excluded?: boolean }) {
   const qc = useQueryClient();
   const { data: unsorted } = useQuery({
-    queryKey: ["unsorted-employees"],
-    queryFn: () => api.get<UnsortedEmployee[]>("/settings/unsorted-employees"),
+    queryKey: ["unsorted-employees", excluded],
+    queryFn: () =>
+      api.get<UnsortedEmployee[]>(`/settings/unsorted-employees${excluded ? "?excluded=true" : ""}`),
   });
   const { data: groups } = useQuery({
     queryKey: ["departments"],
@@ -374,8 +400,12 @@ function UnsortedEmployeesSection() {
 
   return (
     <Section
-      title={`Unsorted employees (${unsorted.length})`}
-      description="Nobody appears in the directory until you place them. Pick a department — and a section where the department has them — for each person."
+      title={excluded ? `Not in the directory (${unsorted.length})` : `Unsorted employees (${unsorted.length})`}
+      description={
+        excluded
+          ? "Their job title keeps them out of the directory by default. Place one to add them anyway — useful for directors you want listed for reference."
+          : "Nobody appears in the directory until you place them. Pick a department — and a section where the department has them — for each person."
+      }
     >
       <div className="divide-y divide-line/70">
         {unsorted.map((emp) => {
@@ -441,7 +471,7 @@ function UnsortedEmployeesSection() {
                 onClick={() => sort.mutate({ id: emp.id, group: draft.group, section: draft.section })}
                 className="text-sm bg-ink text-paper rounded-lg px-3 py-1.5 disabled:opacity-40"
               >
-                Place
+                {excluded ? "Add" : "Place"}
               </button>
             </div>
           );
@@ -745,6 +775,7 @@ export default function Settings() {
       <ZenhrConnectBanner />
       <SyncSection />
       <UnsortedEmployeesSection />
+      <UnsortedEmployeesSection excluded />
       <UnmatchedRepsSection />
       <EmployeeOverridesSection />
       <HolidaysSection />

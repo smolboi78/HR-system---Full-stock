@@ -73,6 +73,9 @@ class EmployeeCardOut(BaseModel):
     # The sub-tab within that department, or null for a department with no
     # sections (Commercial).
     org_section: str | None = None
+    # False for someone listed for reference who never clocks in - their
+    # hours and days present/absent carry no meaning.
+    track_attendance: bool = True
     period_hours: float | None = None
     period_visits: int | None = None
     period_days_present: int | None = None
@@ -125,6 +128,10 @@ class EmployeeProfileOut(BaseModel):
     # admin-maintained, not synced.
     vacation_balance_days: float | None
 
+    # False hides hours, days present/absent and the attendance tab: this
+    # person is listed for reference and their time off is what matters.
+    track_attendance: bool = True
+
     period_hours: float
     period_visits: int
     period_days_present: int
@@ -158,12 +165,16 @@ class EmployeeOverrideOut(BaseModel):
     effective_org_group: str
     effective_org_section: str | None
 
+    category: str
+    track_attendance: bool
+
 
 class EmployeeOverrideRequest(BaseModel):
     # Empty string or null clears the override and falls back to ZenHR.
     job_title: str | None = None
     org_group: str | None = None
     org_section: str | None = None
+    track_attendance: bool | None = None
 
 
 class UnsortedEmployeeOut(BaseModel):

@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -54,7 +55,15 @@ def list_employees(
 
     query = db.query(Employee)
     if not include_excluded:
-        query = query.filter(Employee.category != EmployeeCategory.EXCLUDED)
+        # Placing someone is an explicit decision that they belong in the
+        # directory, so it outranks the default exclusion their job title
+        # carries - that's how a director listed for reference gets in.
+        query = query.filter(
+            or_(
+                Employee.category != EmployeeCategory.EXCLUDED,
+                Employee.directory_confirmed.is_(True),
+            )
+        )
     if not include_inactive:
         query = query.filter(Employee.active.is_(True))
     # Nobody appears until an admin has placed them, so a new hire can't land
@@ -78,6 +87,7 @@ def list_employees(
                 active=emp.active,
                 org_group=org_chart.group_for_employee(emp),
                 org_section=org_chart.section_for_employee(emp),
+                track_attendance=emp.track_attendance,
                 period_hours=summary.hours,
                 period_visits=summary.visits,
                 period_days_present=summary.days_present,
@@ -182,6 +192,7 @@ def get_employee_profile(
         active=employee.active,
         hiring_date=employee.hiring_date,
         vacation_balance_days=employee.vacation_balance_days,
+        track_attendance=employee.track_attendance,
         period_hours=summary.hours,
         period_visits=summary.visits,
         period_days_present=summary.days_present,

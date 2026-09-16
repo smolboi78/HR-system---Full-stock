@@ -133,6 +133,12 @@ class Employee(Base):
     # Settings for sorting - including anyone arriving from a later sync.
     directory_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Someone who doesn't clock in (a director listed for reference). They
+    # keep a profile and their time off, but hours and days present/absent
+    # are meaningless for them - without this they read as absent every
+    # working day, in the directory and in every report.
+    track_attendance: Mapped[bool] = mapped_column(Boolean, default=True)
+
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     hiring_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     termination_date: Mapped[date | None] = mapped_column(Date, nullable=True)
