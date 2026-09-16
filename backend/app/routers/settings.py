@@ -7,6 +7,7 @@ from app.deps import require_admin
 from app.models import (
     DepartmentCategoryRule,
     Employee,
+    EmployeeCategory,
     EmployeeNameOverride,
     Holiday,
     JobRoleCategoryRule,
@@ -25,7 +26,9 @@ from app.schemas import (
     LinkRepRequest,
     NameOverrideOut,
     NameOverrideRequest,
+    SortEmployeeRequest,
     UnmatchedRepOut,
+    UnsortedEmployeeOut,
     UserCreateRequest,
     UserOut,
     UserUpdateRequest,
@@ -140,6 +143,30 @@ def delete_department_rule(department: str, db: Session = Depends(get_db), _: Us
 # ---------- Per-employee title / group corrections ----------
 
 
+def _validated_group(value: str | None) -> str | None:
+    group = (value or "").strip()
+    if group and group not in org_chart.ORG_GROUPS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Unknown group '{group}' - must be one of: {', '.join(org_chart.ORG_GROUPS)}",
+        )
+    return group or None
+
+
+def _validated_section(group: str | None, value: str | None) -> str | None:
+    section = (value or "").strip()
+    if not section:
+        return None
+    allowed = org_chart.SECTIONS_BY_GROUP.get(group or "", [])
+    if section not in allowed:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"'{section}' is not a section of '{group}'"
+            + (f" - must be one of: {', '.join(allowed)}" if allowed else " - it has no sections"),
+        )
+    return section
+
+
 def _override_row(employee: Employee) -> EmployeeOverrideOut:
     return EmployeeOverrideOut(
         id=employee.id,
@@ -148,8 +175,10 @@ def _override_row(employee: Employee) -> EmployeeOverrideOut:
         synced_department=employee.department,
         job_title_override=employee.job_title_override,
         org_group_override=employee.org_group_override,
+        org_section_override=employee.org_section_override,
         effective_job_title=employee.effective_job_title,
         effective_org_group=org_chart.group_for_employee(employee),
+        effective_org_section=org_chart.section_for_employee(employee),
     )
 
 
@@ -176,16 +205,13 @@ def set_employee_override(
     if not employee:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
 
-    group = (payload.org_group or "").strip()
-    if group and group not in org_chart.ORG_GROUPS:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"Unknown group '{group}' - must be one of: {', '.join(org_chart.ORG_GROUPS)}",
-        )
+    group = _validated_group(payload.org_group)
+    section = _validated_section(group, payload.org_section)
 
     # Blank clears the override so the person falls back to ZenHR's value.
     employee.job_title_override = (payload.job_title or "").strip() or None
-    employee.org_group_override = group or None
+    employee.org_group_override = group
+    employee.org_section_override = section
     db.commit()
     db.refresh(employee)
     return _override_row(employee)
@@ -225,6 +251,74 @@ def delete_name_override(override_id: str, db: Session = Depends(get_db), _: Use
     db.delete(override)
     db.commit()
     return {"ok": True}
+
+
+# ---------- Directory sorting ----------
+
+
+@router.get("/unsorted-employees", response_model=list[UnsortedEmployeeOut])
+def list_unsorted_employees(
+    db: Session = Depends(get_db), _: User = Depends(require_admin)
+) -> list[UnsortedEmployeeOut]:
+    """Active employees no admin has placed yet. EXCLUDED people are left out
+    entirely - they never appear in the directory, so there is nothing to
+    sort them into and they would never let this list empty."""
+    employees = (
+        db.query(Employee)
+        .filter(
+            Employee.directory_confirmed.is_(False),
+            Employee.active.is_(True),
+            Employee.category != EmployeeCategory.EXCLUDED,
+        )
+        .order_by(Employee.display_name)
+        .all()
+    )
+    rows = []
+    for emp in employees:
+        group, section = org_chart.place_for(emp.department, emp.effective_job_title)
+        rows.append(
+            UnsortedEmployeeOut(
+                id=emp.id,
+                display_name=emp.display_name,
+                job_title=emp.effective_job_title,
+                department=emp.department,
+                photo_url=emp.photo_url,
+                suggested_group=group,
+                suggested_section=section,
+            )
+        )
+    return rows
+
+
+@router.post("/unsorted-employees/{employee_id}/sort", response_model=EmployeeOverrideOut)
+def sort_employee(
+    employee_id: str,
+    payload: SortEmployeeRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> EmployeeOverrideOut:
+    employee = db.get(Employee, employee_id)
+    if not employee:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Employee not found")
+
+    group = _validated_group(payload.org_group)
+    if not group:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A department is required")
+
+    sections = org_chart.SECTIONS_BY_GROUP.get(group, [])
+    section = _validated_section(group, payload.org_section)
+    if sections and not section:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"'{group}' needs a section - one of: {', '.join(sections)}",
+        )
+
+    employee.org_group_override = group
+    employee.org_section_override = section
+    employee.directory_confirmed = True
+    db.commit()
+    db.refresh(employee)
+    return _override_row(employee)
 
 
 # ---------- Unlinked Bricks reps ----------

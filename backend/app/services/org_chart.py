@@ -159,8 +159,16 @@ def section_for_employee(employee) -> str | None:
     their role doesn't belong to has no meaningful section, so they fall to
     the department's trailing "Other" sub-tab rather than a wrong one."""
     group = group_for_employee(employee)
-    if not SECTIONS_BY_GROUP.get(group):
+    sections = SECTIONS_BY_GROUP.get(group)
+    if not sections:
         return None
+
+    # An admin placed them here by hand - but a section belonging to some
+    # other department (left behind by a group change) would hide them from
+    # every sub-tab, so only honour one this department actually has.
+    override = employee.org_section_override
+    if override:
+        return override if override in sections else UNSECTIONED
 
     derived_group, section = place_for(employee.department, employee.effective_job_title)
     if section and derived_group == group:

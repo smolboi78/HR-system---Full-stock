@@ -28,8 +28,20 @@ export interface EmployeeOverride {
   synced_department: string | null;
   job_title_override: string | null;
   org_group_override: string | null;
+  org_section_override: string | null;
   effective_job_title: string | null;
   effective_org_group: string;
+  effective_org_section: string | null;
+}
+
+export interface UnsortedEmployee {
+  id: string;
+  display_name: string;
+  job_title: string | null;
+  department: string | null;
+  photo_url: string | null;
+  suggested_group: string;
+  suggested_section: string | null;
 }
 
 export interface EmployeeCard {

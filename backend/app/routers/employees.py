@@ -46,6 +46,7 @@ def list_employees(
     period_end: date | None = Query(default=None),
     include_excluded: bool = Query(default=False),
     include_inactive: bool = Query(default=False),
+    include_unsorted: bool = Query(default=False),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[EmployeeCardOut]:
@@ -56,6 +57,10 @@ def list_employees(
         query = query.filter(Employee.category != EmployeeCategory.EXCLUDED)
     if not include_inactive:
         query = query.filter(Employee.active.is_(True))
+    # Nobody appears until an admin has placed them, so a new hire can't land
+    # on a tab by guesswork. They're listed in Settings until sorted.
+    if not include_unsorted:
+        query = query.filter(Employee.directory_confirmed.is_(True))
     employees = query.order_by(Employee.display_name).all()
 
     cards = []

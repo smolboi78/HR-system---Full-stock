@@ -126,6 +126,12 @@ class Employee(Base):
     # would be silently wiped the next time anyone hit "Sync now".
     job_title_override: Mapped[str | None] = mapped_column(String, nullable=True)
     org_group_override: Mapped[str | None] = mapped_column(String, nullable=True)
+    org_section_override: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # An admin has placed this person into a department/section themselves.
+    # Until they have, the person is left out of the directory and listed in
+    # Settings for sorting - including anyone arriving from a later sync.
+    directory_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     hiring_date: Mapped[date | None] = mapped_column(Date, nullable=True)

@@ -10,6 +10,7 @@ import type {
   NameOverride,
   SyncRun,
   UnmatchedRep,
+  UnsortedEmployee,
   User,
 } from "../api/types";
 import { CATEGORY_LABEL } from "../lib/category";
@@ -40,7 +41,7 @@ const AUTO_GROUP = "";
 function EmployeeOverridesSection() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, { title: string; group: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { title: string; group: string; section: string }>>({});
 
   const { data: rows } = useQuery({
     queryKey: ["employee-overrides"],
@@ -52,8 +53,14 @@ function EmployeeOverridesSection() {
   });
 
   const save = useMutation({
-    mutationFn: ({ id, title, group }: { id: string; title: string; group: string }) =>
-      api.put(`/settings/employee-overrides/${id}`, { job_title: title, org_group: group }),
+    mutationFn: ({ id, title, group, section }: { id: string; title: string; group: string; section: string }) =>
+      // section must go with every save: omitting it would clear a placement
+      // made in the unsorted-employees list.
+      api.put(`/settings/employee-overrides/${id}`, {
+        job_title: title,
+        org_group: group,
+        org_section: group ? section || null : null,
+      }),
     onSuccess: (_data, vars) => {
       setDrafts((d) => {
         const next = { ...d };
@@ -69,16 +76,23 @@ function EmployeeOverridesSection() {
     search ? r.display_name.toLowerCase().includes(search.toLowerCase()) : true
   );
 
+  const sectionsOf = (group: string) => groups?.find((g) => g.name === group)?.sections ?? [];
+
   const draftFor = (row: EmployeeOverride) =>
     drafts[row.id] ?? {
       title: row.job_title_override ?? "",
       group: row.org_group_override ?? AUTO_GROUP,
+      section: row.org_section_override ?? "",
     };
 
   const isDirty = (row: EmployeeOverride) => {
     const d = drafts[row.id];
     if (!d) return false;
-    return d.title !== (row.job_title_override ?? "") || d.group !== (row.org_group_override ?? AUTO_GROUP);
+    return (
+      d.title !== (row.job_title_override ?? "") ||
+      d.group !== (row.org_group_override ?? AUTO_GROUP) ||
+      d.section !== (row.org_section_override ?? "")
+    );
   };
 
   return (
@@ -119,7 +133,9 @@ function EmployeeOverridesSection() {
                 />
                 <select
                   value={draft.group}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [row.id]: { ...draft, group: e.target.value } }))}
+                  onChange={(e) =>
+                    setDrafts((d) => ({ ...d, [row.id]: { ...draft, group: e.target.value, section: "" } }))
+                  }
                   className="text-sm border border-line rounded-lg px-2 py-1"
                 >
                   <option value={AUTO_GROUP}>Auto (from title)</option>
@@ -129,9 +145,25 @@ function EmployeeOverridesSection() {
                     </option>
                   ))}
                 </select>
+                {sectionsOf(draft.group).length > 0 && (
+                  <select
+                    value={draft.section}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [row.id]: { ...draft, section: e.target.value } }))}
+                    className="text-sm border border-line rounded-lg px-2 py-1"
+                  >
+                    <option value="">Auto (from title)</option>
+                    {sectionsOf(draft.group).map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button
                   disabled={!dirty || save.isPending}
-                  onClick={() => save.mutate({ id: row.id, title: draft.title, group: draft.group })}
+                  onClick={() =>
+                    save.mutate({ id: row.id, title: draft.title, group: draft.group, section: draft.section })
+                  }
                   className="text-sm bg-ink text-paper rounded-lg px-3 py-1 disabled:opacity-40"
                 >
                   Save
@@ -308,6 +340,108 @@ function DepartmentRulesSection() {
           </div>
         ))}
       </div>
+    </Section>
+  );
+}
+
+function UnsortedEmployeesSection() {
+  const qc = useQueryClient();
+  const { data: unsorted } = useQuery({
+    queryKey: ["unsorted-employees"],
+    queryFn: () => api.get<UnsortedEmployee[]>("/settings/unsorted-employees"),
+  });
+  const { data: groups } = useQuery({
+    queryKey: ["departments"],
+    queryFn: () => api.get<Department[]>("/employees/departments"),
+  });
+  const [drafts, setDrafts] = useState<Record<string, { group: string; section: string }>>({});
+
+  const sort = useMutation({
+    mutationFn: ({ id, group, section }: { id: string; group: string; section: string }) =>
+      api.post(`/settings/unsorted-employees/${id}/sort`, { org_group: group, org_section: section || null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["unsorted-employees"] });
+      qc.invalidateQueries({ queryKey: ["employees"] });
+      qc.invalidateQueries({ queryKey: ["employee-overrides"] });
+    },
+  });
+
+  // Nothing left to sort: the section disappears rather than sitting there
+  // empty. A later sync bringing in a new hire puts it straight back.
+  if (!unsorted || unsorted.length === 0) return null;
+
+  const sectionsOf = (group: string) => groups?.find((g) => g.name === group)?.sections ?? [];
+
+  return (
+    <Section
+      title={`Unsorted employees (${unsorted.length})`}
+      description="Nobody appears in the directory until you place them. Pick a department — and a section where the department has them — for each person."
+    >
+      <div className="divide-y divide-line/70">
+        {unsorted.map((emp) => {
+          const draft = drafts[emp.id] ?? {
+            group: emp.suggested_group,
+            section: emp.suggested_section ?? "",
+          };
+          const sections = sectionsOf(draft.group);
+          const needsSection = sections.length > 0;
+          const ready = Boolean(draft.group) && (!needsSection || Boolean(draft.section));
+
+          return (
+            <div key={emp.id} className="py-3 flex items-center gap-3 flex-wrap">
+              <div className="flex-1 min-w-[11rem]">
+                <div className="text-sm font-medium">{emp.display_name}</div>
+                <div className="text-xs text-muted mt-0.5">
+                  {emp.job_title || "no title"}
+                  {emp.department ? ` · ${emp.department}` : ""}
+                </div>
+              </div>
+
+              <select
+                value={draft.group}
+                onChange={(e) =>
+                  // The old section can't exist under a new department.
+                  setDrafts((d) => ({ ...d, [emp.id]: { group: e.target.value, section: "" } }))
+                }
+                className="text-sm border border-line rounded-lg px-2 py-1.5 bg-white"
+              >
+                {(groups ?? []).map((g) => (
+                  <option key={g.name} value={g.name}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+
+              {needsSection && (
+                <select
+                  value={draft.section}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [emp.id]: { ...draft, section: e.target.value } }))}
+                  className="text-sm border border-line rounded-lg px-2 py-1.5 bg-white"
+                >
+                  <option value="">Section…</option>
+                  {sections.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              <button
+                disabled={!ready || sort.isPending}
+                onClick={() => sort.mutate({ id: emp.id, group: draft.group, section: draft.section })}
+                className="text-sm bg-ink text-paper rounded-lg px-3 py-1.5 disabled:opacity-40"
+              >
+                Place
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {sort.isError && (
+        <p className="text-sm text-red-600">Couldn't place them — {(sort.error as Error).message}</p>
+      )}
     </Section>
   );
 }
@@ -601,6 +735,7 @@ export default function Settings() {
       </div>
       <ZenhrConnectBanner />
       <SyncSection />
+      <UnsortedEmployeesSection />
       <UnmatchedRepsSection />
       <EmployeeOverridesSection />
       <HolidaysSection />

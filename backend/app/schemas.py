@@ -152,15 +152,38 @@ class EmployeeOverrideOut(BaseModel):
 
     job_title_override: str | None
     org_group_override: str | None
+    org_section_override: str | None
 
     effective_job_title: str | None
     effective_org_group: str
+    effective_org_section: str | None
 
 
 class EmployeeOverrideRequest(BaseModel):
     # Empty string or null clears the override and falls back to ZenHR.
     job_title: str | None = None
     org_group: str | None = None
+    org_section: str | None = None
+
+
+class UnsortedEmployeeOut(BaseModel):
+    """Someone no admin has placed yet. They stay out of the directory until
+    they are sorted, which is what empties this list."""
+
+    id: str
+    display_name: str
+    job_title: str | None
+    department: str | None
+    photo_url: str | None
+    # Where they would land if placed automatically, offered as the default.
+    suggested_group: str
+    suggested_section: str | None
+
+
+class SortEmployeeRequest(BaseModel):
+    org_group: str
+    # Required for a department that has sections; ignored for a flat one.
+    org_section: str | None = None
 
 
 # ---------- Settings ----------
