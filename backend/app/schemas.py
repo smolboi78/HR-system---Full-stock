@@ -176,6 +176,7 @@ class UnsortedEmployeeOut(BaseModel):
     department: str | None
     photo_url: str | None
     # Where they would land if placed automatically, offered as the default.
+    # Empty when no rule matched them and there is nothing to suggest.
     suggested_group: str
     suggested_section: str | None
 

@@ -276,6 +276,12 @@ def list_unsorted_employees(
     rows = []
     for emp in employees:
         group, section = org_chart.place_for(emp.department, emp.effective_job_title)
+        # Nothing matched their title or department. "Ungrouped" is not a
+        # department anyone can be placed into, so offer no suggestion at all
+        # and make the admin choose, rather than pre-filling a value the
+        # dropdown can't offer and the API would reject.
+        if group == org_chart.UNGROUPED:
+            group, section = "", None
         rows.append(
             UnsortedEmployeeOut(
                 id=emp.id,

@@ -395,6 +395,11 @@ function UnsortedEmployeesSection() {
                   {emp.job_title || "no title"}
                   {emp.department ? ` · ${emp.department}` : ""}
                 </div>
+                {!emp.suggested_group && (
+                  <div className="text-[11px] text-amber-700 mt-0.5">
+                    Their title matches no department — pick one.
+                  </div>
+                )}
               </div>
 
               <select
@@ -405,6 +410,10 @@ function UnsortedEmployeesSection() {
                 }
                 className="text-sm border border-line rounded-lg px-2 py-1.5 bg-white"
               >
+                {/* Without this, a row with no suggestion would display the
+                    first department while holding "" - so Place would look
+                    ready and file them somewhere nobody chose. */}
+                <option value="">Department…</option>
                 {(groups ?? []).map((g) => (
                   <option key={g.name} value={g.name}>
                     {g.name}
