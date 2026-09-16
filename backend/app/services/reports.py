@@ -44,6 +44,19 @@ def _attendance_rows(db: Session, employee: Employee, start: date, end: date) ->
     ]
 
 
+def _attendance_cells(employee: Employee, summary) -> dict:
+    """Days present/expected/absent, or "-" for someone who never clocks in.
+    A zero here would read as a real attendance record rather than a figure
+    that does not apply to them."""
+    if not employee.track_attendance:
+        return {"Days present": "-", "Days expected": "-", "Days absent": "-"}
+    return {
+        "Days present": summary.days_present,
+        "Days expected": summary.days_expected,
+        "Days absent": summary.days_absent,
+    }
+
+
 def employee_report_data(db: Session, employee: Employee, start: date, end: date) -> dict:
     summary = compute_period_summary(db, employee, start, end)
     return {
@@ -65,9 +78,7 @@ def employee_report_excel(db: Session, employee: Employee, start: date, end: dat
                 "Period": data["period"],
                 "Hours worked": data["summary"].hours,
                 "Visits": data["summary"].visits,
-                "Days present": data["summary"].days_present,
-                "Days expected": data["summary"].days_expected,
-                "Days absent": data["summary"].days_absent,
+                **_attendance_cells(employee, data["summary"]),
             }
         ]
     )
@@ -99,10 +110,14 @@ _EMPLOYEE_PDF_TEMPLATE = Template(
       <h1>{{ employee.display_name }}</h1>
       <div class="meta">{{ employee.effective_job_title or "" }} &middot; {{ period }}</div>
       <div class="summary">
+        {% if employee.track_attendance %}
         <div class="stat"><div class="value">{{ summary.hours }}</div><div class="label">Hours worked</div></div>
+        {% endif %}
         <div class="stat"><div class="value">{{ summary.visits }}</div><div class="label">Visits</div></div>
+        {% if employee.track_attendance %}
         <div class="stat"><div class="value">{{ summary.days_present }}/{{ summary.days_expected }}</div><div class="label">Days present</div></div>
         <div class="stat"><div class="value">{{ summary.days_absent }}</div><div class="label">Days absent</div></div>
+        {% endif %}
       </div>
       <table>
         <thead><tr><th>Date</th><th>Entry</th><th>Exit</th><th>Hours</th><th>Status</th></tr></thead>
@@ -142,9 +157,7 @@ def joint_report_rows(db: Session, start: date, end: date) -> list[dict]:
                 "Category": employee.category,
                 "Hours worked": summary.hours,
                 "Visits": summary.visits,
-                "Days present": summary.days_present,
-                "Days expected": summary.days_expected,
-                "Days absent": summary.days_absent,
+                **_attendance_cells(employee, summary),
             }
         )
     return rows

@@ -13,7 +13,11 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
 }
 
 export default function EmployeeCard({ employee }: { employee: EmployeeCardType }) {
-  const showHours = employee.category === "MANAGEMENT" || employee.category === "DELIVERY_AGENT";
+  // Someone listed for reference never clocks in, so days present would read
+  // 0/0 and hours 0 - noise that looks like a bad attendance record.
+  const tracksAttendance = employee.track_attendance;
+  const showHours =
+    tracksAttendance && (employee.category === "MANAGEMENT" || employee.category === "DELIVERY_AGENT");
   const showVisits =
     employee.category === "SALES" || employee.category === "COLLECTOR" || employee.category === "DELIVERY_AGENT";
 
@@ -33,14 +37,16 @@ export default function EmployeeCard({ employee }: { employee: EmployeeCardType 
       <div className="flex items-center gap-6 pt-3 border-t border-line/70">
         {showHours && <MiniStat label="Hours" value={employee.period_hours ?? "—"} />}
         {showVisits && <MiniStat label="Visits" value={employee.period_visits ?? "—"} />}
-        <MiniStat
-          label="Days present"
-          value={
-            employee.period_days_present != null && employee.period_days_expected != null
-              ? `${employee.period_days_present}/${employee.period_days_expected}`
-              : "—"
-          }
-        />
+        {tracksAttendance && (
+          <MiniStat
+            label="Days present"
+            value={
+              employee.period_days_present != null && employee.period_days_expected != null
+                ? `${employee.period_days_present}/${employee.period_days_expected}`
+                : "—"
+            }
+          />
+        )}
       </div>
     </Link>
   );
