@@ -50,6 +50,9 @@ class DepartmentOut(BaseModel):
 
     id: str
     name: str
+    # The department's sections, in org-chart order. Empty for a flat
+    # department, which renders no sub-tabs.
+    sections: list[str] = []
 
 
 # ---------- Employees ----------
@@ -67,6 +70,9 @@ class EmployeeCardOut(BaseModel):
     # Which org-chart group this person belongs to - drives the directory's
     # department tabs. Derived from role/department, see services/org_chart.
     org_group: str = ""
+    # The sub-tab within that department, or null for a department with no
+    # sections (Commercial).
+    org_section: str | None = None
     period_hours: float | None = None
     period_visits: int | None = None
     period_days_present: int | None = None

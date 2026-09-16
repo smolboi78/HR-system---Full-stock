@@ -18,6 +18,7 @@ export type EmployeeCategory =
 export interface Department {
   id: string;
   name: string;
+  sections: string[];
 }
 
 export interface EmployeeOverride {
@@ -41,6 +42,7 @@ export interface EmployeeCard {
   photo_url: string | null;
   active: boolean;
   org_group: string;
+  org_section: string | null;
   period_hours: number | null;
   period_visits: number | null;
   period_days_present: number | null;

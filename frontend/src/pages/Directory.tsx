@@ -7,10 +7,12 @@ import PeriodPicker from "../components/PeriodPicker";
 import { lastNDays, type Period } from "../lib/period";
 
 const ALL_DEPARTMENTS = "ALL";
+const ALL_SECTIONS = "ALL";
 
 export default function Directory() {
   const [period, setPeriod] = useState<Period>(lastNDays(30));
   const [department, setDepartment] = useState<string>(ALL_DEPARTMENTS);
+  const [section, setSection] = useState<string>(ALL_SECTIONS);
   const [search, setSearch] = useState("");
 
   const { data: employees, isLoading, error } = useQuery({
@@ -35,14 +37,33 @@ export default function Directory() {
     return [...groups, ...Array.from(new Set(leftovers))];
   }, [orgGroups, employees]);
 
+  // Sub-tabs for the selected department, plus any section the API placed
+  // someone in that the org chart doesn't list (e.g. the trailing "Other"),
+  // so nobody is filtered out of a tab they're counted under.
+  const sections = useMemo(() => {
+    if (department === ALL_DEPARTMENTS) return [];
+    const declared = (orgGroups ?? []).find((d) => d.name === department)?.sections ?? [];
+    const extras = (employees ?? [])
+      .filter((e) => e.org_group === department && e.org_section)
+      .map((e) => e.org_section as string)
+      .filter((s) => !declared.includes(s));
+    return [...declared, ...Array.from(new Set(extras))];
+  }, [orgGroups, employees, department]);
+
   const filtered = useMemo(() => {
     if (!employees) return [];
     return employees.filter((e) => {
       if (department !== ALL_DEPARTMENTS && e.org_group !== department) return false;
+      if (section !== ALL_SECTIONS && e.org_section !== section) return false;
       if (search && !e.display_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [employees, department, search]);
+  }, [employees, department, section, search]);
+
+  function selectDepartment(next: string) {
+    setDepartment(next);
+    setSection(ALL_SECTIONS); // a section from the old tab doesn't exist here
+  }
 
   return (
     <div className="space-y-6">
@@ -59,12 +80,30 @@ export default function Directory() {
           {[ALL_DEPARTMENTS, ...departments].map((d) => (
             <button
               key={d}
-              onClick={() => setDepartment(d)}
+              onClick={() => selectDepartment(d)}
               className={`px-4 py-2.5 text-sm whitespace-nowrap -mb-px border-b-2 transition-colors ${
                 department === d ? "border-ink text-ink font-medium" : "border-transparent text-muted hover:text-ink"
               }`}
             >
               {d === ALL_DEPARTMENTS ? "All departments" : d}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {sections.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {[ALL_SECTIONS, ...sections].map((s) => (
+            <button
+              key={s}
+              onClick={() => setSection(s)}
+              className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                section === s
+                  ? "bg-ink text-paper border-ink"
+                  : "border-line text-muted hover:text-ink hover:border-ink/30"
+              }`}
+            >
+              {s === ALL_SECTIONS ? `All of ${department}` : s}
             </button>
           ))}
         </div>

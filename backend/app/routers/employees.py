@@ -72,6 +72,7 @@ def list_employees(
                 photo_url=emp.photo_url,
                 active=emp.active,
                 org_group=org_chart.group_for_employee(emp),
+                org_section=org_chart.section_for_employee(emp),
                 period_hours=summary.hours,
                 period_visits=summary.visits,
                 period_days_present=summary.days_present,
@@ -86,17 +87,21 @@ def list_departments(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[DepartmentOut]:
-    """The directory's department tabs: Full Stock's six org-chart groups,
-    in the chart's own order (not alphabetical, not ZenHR's wordier raw
-    department names). An employee's group is derived per-request from
-    their role/department - see services/org_chart - so this needs no sync
-    of its own and no group can go missing just because nobody in it has
-    been categorized yet.
+    """The directory's department tabs: Full Stock's four org-chart
+    departments and their sections, in the chart's own order (not
+    alphabetical, not ZenHR's wordier raw department names). An employee's
+    department and section are derived per-request from their
+    role/department - see services/org_chart - so this needs no sync of its
+    own and nothing can go missing just because nobody in it has been
+    categorized yet.
 
     ZenHR's raw department list is still synced into the Department table;
     it's just not what the directory groups people by.
     """
-    return [DepartmentOut(id=name, name=name) for name in org_chart.ORG_GROUPS]
+    return [
+        DepartmentOut(id=name, name=name, sections=sections)
+        for name, sections in org_chart.ORG_STRUCTURE
+    ]
 
 
 def _get_employee_or_404(db: Session, employee_id: str) -> Employee:
