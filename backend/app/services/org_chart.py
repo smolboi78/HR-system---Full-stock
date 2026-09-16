@@ -15,17 +15,21 @@ spacing-insensitive, since both fields are free text in ZenHR.
 # Order matters - this is the order the directory's tabs appear in, taken
 # from the org chart rather than sorted alphabetically. Commercial is
 # deliberately flat: it has no sections, so it renders no sub-tabs.
+UNGROUPED = "Ungrouped"
+
 ORG_STRUCTURE: list[tuple[str, list[str]]] = [
     ("Executive Management", ["Managers / Directors", "Human Resources"]),
     ("Finance Department", ["Accounting", "Collection"]),
     ("Supply Chain", ["Warehouse", "Logistics", "Purchasing"]),
     ("Commercial", []),
+    # Last, and flat: somewhere to park anyone who fits none of the above, or
+    # whose department isn't decided yet. Also where the fallback below lands,
+    # so an unrecognised role is a real tab rather than a dead end.
+    (UNGROUPED, []),
 ]
 
 ORG_GROUPS = [name for name, _ in ORG_STRUCTURE]
 SECTIONS_BY_GROUP = {name: sections for name, sections in ORG_STRUCTURE}
-
-UNGROUPED = "Ungrouped"
 # Someone whose department is known but whose role matches no section - they
 # belong on the department tab, just not under any of its sections.
 UNSECTIONED = "Other"
