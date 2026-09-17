@@ -12,11 +12,19 @@ own deploy. The two may merge later; nothing here depends on that one.
 ```bash
 cp .env.example .env    # fill in the values
 npm install
-npx prisma migrate deploy
+npm run migrate:deploy
 npm run seed            # roster, reason list, leave buckets
 npm run dev             # http://localhost:3001
 npm test                # the resolution engine's rules
 ```
+
+Database URLs are resolved by `scripts/with-db-env.mjs`, which every db-touching
+script runs through. It accepts whatever the host calls them (`DATABASE_URL`,
+`POSTGRES_PRISMA_URL`, `POSTGRES_URL`) and splits pooled from direct
+(`DIRECT_URL`, `DATABASE_URL_UNPOOLED`, `POSTGRES_URL_NON_POOLING`) — the app
+uses the pooled connection, migrations need the direct one. A bare
+`npx prisma …` bypasses the wrapper and will complain that `DIRECT_URL` is
+missing; use the npm scripts.
 
 First boot, in order:
 
@@ -108,13 +116,30 @@ Resolved while building:
   type vacation balance?* If there is, it drops into `readBalances()` in `src/lib/pull.ts` and the
   pane shows real remaining days.
 
-## Deploying to Railway
+## Deploying to Vercel
 
-Add a Postgres plugin, point the service at this subdirectory, and set the variables from
-`.env.example`. `railway.json` builds with `npm ci && npm run build` and starts with `npm run start`,
-which runs `prisma migrate deploy` and the seed before booting, so a fresh deploy comes up with the
-roster already in place. `ZENHR_REDIRECT_URI` has to match the deployed domain, and the same URL
-must be registered on the ZenHR OAuth application.
+This lives in a subdirectory of a repo that also holds the HR dashboard, so it deploys as its **own
+Vercel project** with **Root Directory** set to `attendance-tool`.
+
+1. Vercel → Add New → Project → import `smolboi78/HR-system---Full-stock`
+2. **Root Directory**: `attendance-tool`. Framework autodetects as Next.js.
+3. Attach a Postgres (Vercel Marketplace → Neon, or any Postgres) and set the variables from
+   `.env.example`.
+4. Deploy. The build runs `prisma migrate deploy` and the seed before `next build`, so the first
+   deploy comes up with the roster already in place — Vercel never runs `npm start`, which is why
+   that work lives in the build rather than at boot.
+5. `ZENHR_REDIRECT_URI` must match the deployed domain, and the same URL has to be registered on the
+   ZenHR OAuth application.
+
+Two notes specific to serverless:
+
+- **Function time limit.** A pull fans out ZenHR calls, and reading every employee's shift
+  individually would be ~36 of them. Shifts are therefore cached on the roster row and refreshed
+  daily, which takes a routine pull down to about 6 calls; `?refreshShifts=1` forces a re-read when
+  someone's shift has just changed. `vercel.json` allows 60s for the reconcile and apply functions,
+  which is the Hobby ceiling (Pro allows 300s).
+- **Connection pooling.** Use the pooled connection string for the app; the wrapper hands the direct
+  one to migrations.
 
 ## Layout
 

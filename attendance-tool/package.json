@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001",
-    "build": "prisma generate && next build",
-    "start": "prisma migrate deploy && npm run seed && next start -p ${PORT:-3000}",
-    "seed": "tsx scripts/seed.ts",
+    "dev": "node scripts/with-db-env.mjs next dev -p 3001",
+    "build": "prisma generate && node scripts/with-db-env.mjs \"prisma migrate deploy && tsx scripts/seed.ts\" && next build",
+    "start": "node scripts/with-db-env.mjs next start",
+    "seed": "node scripts/with-db-env.mjs tsx scripts/seed.ts",
     "test": "vitest run",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "migrate:deploy": "node scripts/with-db-env.mjs prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

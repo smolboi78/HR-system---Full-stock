@@ -16,7 +16,9 @@ const Row = z.object({
 // response says which.
 const Body = z.object({ rows: z.array(Row).min(1).max(200) });
 
-export const maxDuration = 300;
+// Vercel caps a function at 60s on Hobby (300s on Pro). Shift data is cached
+// on the roster so a pull makes a handful of ZenHR calls, not one per employee.
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   try {

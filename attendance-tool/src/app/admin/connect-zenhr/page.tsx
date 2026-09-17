@@ -46,7 +46,7 @@ export default async function ConnectZenhrPage({
         <p className="muted" style={{ marginBottom: 0 }}>
           {isBricksConfigured()
             ? "API key is set. Visit counts will be pulled alongside each range."
-            : "BRICKS_API_KEY is not set, so delivery-agent visit counts will be blank. Set it as a Railway variable."}
+            : "BRICKS_API_KEY is not set, so delivery-agent visit counts will be blank. Set it as an environment variable on the project."}
         </p>
       </section>
     </main>

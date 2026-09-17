@@ -104,37 +104,84 @@ export interface ShiftInfo {
   daysOff: number[];
 }
 
+// How long a cached shift is trusted before being re-read from ZenHR.
+const SHIFT_CACHE_MS = 24 * 60 * 60 * 1000;
+
+// Each employee's shift assignment, cached on their roster row.
+//
+// Shifts live on their own per-employee endpoint, so reading them fresh
+// costs one call per person - enough to push a pull past a serverless
+// function's time limit. They change rarely, so they are re-read only when
+// the cache is a day old (or `force` is set), and every other pull reads
+// them straight out of the database.
 async function shiftInfo(
   branchId: number,
-  employees: { employmentNumber: string; zenhrEmployeeId: number | null }[],
-  warnings: string[]
+  employees: {
+    employmentNumber: string;
+    zenhrEmployeeId: number | null;
+    shiftLabel: string | null;
+    shiftDaysOff: number[];
+    shiftSyncedAt: Date | null;
+  }[],
+  warnings: string[],
+  force = false
 ): Promise<Map<string, ShiftInfo>> {
-  const labels = new Map<string, ShiftInfo>();
+  const out = new Map<string, ShiftInfo>();
+  const stale: typeof employees = [];
+
+  for (const emp of employees) {
+    const fresh =
+      !force &&
+      emp.shiftSyncedAt !== null &&
+      Date.now() - emp.shiftSyncedAt.getTime() < SHIFT_CACHE_MS;
+    if (fresh) {
+      // A cached row with no shift means ZenHR had none to give; keep that
+      // answer rather than asking again on every pull.
+      if (emp.shiftLabel) {
+        out.set(emp.employmentNumber, { label: emp.shiftLabel, daysOff: emp.shiftDaysOff });
+      }
+      continue;
+    }
+    if (emp.zenhrEmployeeId) stale.push(emp);
+  }
+
+  if (!stale.length) return out;
+
   let workShifts: zenhr.ZenhrWorkShift[] = [];
   try {
     workShifts = await zenhr.listWorkShifts(branchId);
   } catch (err) {
     warnings.push(`Could not read work shifts from ZenHR: ${(err as Error).message}`);
-    return labels;
+    return out;
   }
   const shiftById = new Map(workShifts.map((s) => [s.id, s]));
 
-  for (const emp of employees) {
-    if (!emp.zenhrEmployeeId) continue;
+  for (const emp of stale) {
     try {
-      const assignments = await zenhr.listEmployeeShifts(branchId, emp.zenhrEmployeeId);
+      const assignments = await zenhr.listEmployeeShifts(branchId, emp.zenhrEmployeeId as number);
       const latest = assignments.sort((a, b) => b.from_date.localeCompare(a.from_date))[0];
-      if (!latest) continue;
-      const shift = shiftById.get(latest.work_shift.id);
-      if (!shift) continue;
+      const shift = latest ? shiftById.get(latest.work_shift.id) : undefined;
+
       // Responses carry the singular `work_shift_interval`; fall back to the
       // shift's own from/to when it has no intervals.
-      const interval = shift.work_shift_interval?.[0];
-      const from = interval?.from_time ?? shift.from_time;
-      const to = interval?.to_time ?? shift.to_time;
-      labels.set(emp.employmentNumber, {
-        label: from && to ? `${from} - ${to}` : shift.name,
-        daysOff: zenhr.weekdayNumbers(shift.days_off),
+      const interval = shift?.work_shift_interval?.[0];
+      const from = interval?.from_time ?? shift?.from_time;
+      const to = interval?.to_time ?? shift?.to_time;
+      const info = shift
+        ? {
+            label: from && to ? `${from} - ${to}` : shift.name,
+            daysOff: zenhr.weekdayNumbers(shift.days_off),
+          }
+        : null;
+
+      if (info) out.set(emp.employmentNumber, info);
+      await prisma.rosterEmployee.update({
+        where: { employmentNumber: emp.employmentNumber },
+        data: {
+          shiftLabel: info?.label ?? null,
+          shiftDaysOff: info?.daysOff ?? [],
+          shiftSyncedAt: new Date(),
+        },
       });
     } catch (err) {
       warnings.push(
@@ -142,7 +189,7 @@ async function shiftInfo(
       );
     }
   }
-  return labels;
+  return out;
 }
 
 // What each employee has actually taken of each type this year, straight
@@ -191,8 +238,11 @@ async function readBalances(
 export interface PullOptions {
   from: DateStr;
   to: DateStr;
-  // Skip the per-employee shift reads, which are the slow part of a pass.
+  // Skip shifts entirely, cache included.
   includeShifts?: boolean;
+  // Re-read every employee's shift from ZenHR instead of trusting the
+  // day-old cache - for when somebody's shift has just been changed.
+  refreshShifts?: boolean;
 }
 
 export async function pullAndReconcile(options: PullOptions): Promise<PullResult> {
@@ -306,7 +356,7 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
   const shifts =
     options.includeShifts === false
       ? new Map<string, ShiftInfo>()
-      : await shiftInfo(branchId, roster, warnings);
+      : await shiftInfo(branchId, roster, warnings, options.refreshShifts === true);
   const balances = await readBalances(branchId, roster, Number(to.slice(0, 4)), warnings);
 
   // Which leave types count as a business mission, so a day covered by one

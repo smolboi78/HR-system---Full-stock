@@ -4,7 +4,11 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // The app connects through the pooler; migrations need the direct
+  // connection because a pooler does not carry their advisory locks.
+  // scripts/with-db-env.mjs resolves both, whatever the host calls them.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------- ZenHR OAuth ----------
@@ -51,6 +55,12 @@ model RosterEmployee {
   // every per-employee read and for the write endpoint.
   zenhrEmployeeId  Int?
   zenhrBranchId    Int?
+  // The employee's shift as ZenHR has it, cached here so a pull does not
+  // make one call per employee every time. Refreshed when older than a day.
+  // shiftDaysOff holds weekday numbers, 0 = Sunday.
+  shiftLabel       String?
+  shiftDaysOff     Int[]          @default([])
+  shiftSyncedAt    DateTime?
   // Bricks logs delivery agents (and some sales staff) under a different,
   // usually shortened name - matched via this fixed alias, never fuzzily.
   bricksAlias      String?

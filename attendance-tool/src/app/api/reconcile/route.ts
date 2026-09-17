@@ -7,7 +7,9 @@ const DateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
 
 // A pass fans out a good number of ZenHR calls (attendance, time off, leave
 // types, shifts per employee), so give it room.
-export const maxDuration = 300;
+// Vercel caps a function at 60s on Hobby (300s on Pro). Shift data is cached
+// on the roster so a pull makes a handful of ZenHR calls, not one per employee.
+export const maxDuration = 60;
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -16,11 +18,13 @@ export async function GET(request: Request) {
       from: DateStr,
       to: DateStr,
       shifts: z.enum(["0", "1"]).optional(),
+      refreshShifts: z.enum(["0", "1"]).optional(),
     })
     .safeParse({
       from: url.searchParams.get("from"),
       to: url.searchParams.get("to"),
       shifts: url.searchParams.get("shifts") ?? undefined,
+      refreshShifts: url.searchParams.get("refreshShifts") ?? undefined,
     });
 
   if (!parsed.success) {
@@ -36,7 +40,12 @@ export async function GET(request: Request) {
 
   try {
     const [result, reasons] = await Promise.all([
-      pullAndReconcile({ from, to, includeShifts: parsed.data.shifts !== "0" }),
+      pullAndReconcile({
+        from,
+        to,
+        includeShifts: parsed.data.shifts !== "0",
+        refreshShifts: parsed.data.refreshShifts === "1",
+      }),
       prisma.reason.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
     ]);
     return NextResponse.json({ ...result, reasons });
