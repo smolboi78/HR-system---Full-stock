@@ -2,6 +2,9 @@
   "name": "fullstock-attendance-tool",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20 <23"
+  },
   "scripts": {
     "dev": "node scripts/with-db-env.mjs next dev -p 3001",
     "build": "prisma generate && node scripts/with-db-env.mjs \"prisma migrate deploy && tsx scripts/seed.ts\" && next build",
