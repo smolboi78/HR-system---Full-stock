@@ -38,7 +38,8 @@ The engine (`src/lib/reconcile.ts`) is pure — no I/O — so the rules are test
 | Situation | Outcome |
 |---|---|
 | Approved time-off transaction covering the day | **On leave**, tagged with that leave type — never an absence, clock-in or not |
-| Public holiday, or a weekly day off | **Day off** |
+| Business mission filed in ZenHR | **Present** — a mission is working time, never leave, never deducted |
+| Public holiday, or a day off on their ZenHR shift | **Day off** |
 | Before hiring / after termination | **Not employed** |
 | Clocked in and out | **Present**, with hours |
 | Clocked in, never out | **Exception** → suggests Missing checkout (half day) |
@@ -55,7 +56,9 @@ Two rules the code holds to deliberately:
 - **An unresolvable day gets a blank reason, not a guess.** A 45-minute day could be a personal
   excuse, a mission, or a broken reader; the tool refuses to pick.
 
-Tracking method comes from the job role: hours matter for management and warehouse; presence in
+Days off come from each employee's assigned ZenHR work shift (`work_shift.days_off`), not from a
+setting in this tool; the roster's own column is only a fallback for someone with no shift assigned,
+and the row says which one it used. Tracking method comes from the job role: hours matter for management and warehouse; presence in
 either system is enough for sales, collectors and support; delivery agents are judged on ZenHR
 hours with Bricks alongside as a signal. Employees 101, 103 and 210 are excluded from all attendance
 rules and produce no rows at all.
@@ -96,13 +99,14 @@ Resolved while building:
   `attendance_records` + `timeoff_transactions`. Same outcome, two reads.
 - **Shifts and clock duration come from different places.** Duration is on the attendance record;
   the shift assignment needs its own per-employee call, which is why `?shifts=0` can skip it.
-- **ZenHR's public API exposes no leave-balance endpoint.** Balances in the review pane are
-  therefore derived: the entitlement set at Settings minus that leave type's approved transactions
-  this calendar year. Keep the entitlements current, or the Emergency/Annual default will lean the
-  wrong way. Statutory entitlement bookkeeping (the 6→7 day change) stays out of scope, as specified.
-
-Still worth confirming with the business, as the spec flagged: that employee 211's
-Business-Mission-covers-absence exception still holds.
+- **ZenHR's documented API exposes no per-leave-type balance.** `timeoff_balance` exists only as a
+  single figure on salary records, and there is no `remaining`/`entitlement` field anywhere in the
+  collection. So the review pane shows **days taken this year**, computed from ZenHR's own approved
+  transactions, and leaves the remaining balance blank rather than deriving it from an entitlement
+  figure kept here — such a figure would drift from ZenHR and quietly mislead the Emergency/Annual
+  call. The one open question for ZenHR support: *is there an endpoint for an employee's per-leave-
+  type vacation balance?* If there is, it drops into `readBalances()` in `src/lib/pull.ts` and the
+  pane shows real remaining days.
 
 ## Deploying to Railway
 
