@@ -31,10 +31,40 @@ const DIRECT_NAMES = [
   "STORAGE_URL_NON_POOLING",
 ];
 
+// Importing a repo can auto-populate variables from a committed
+// .env.example, leaving a DATABASE_URL that looks set but points nowhere.
+// Because DATABASE_URL is checked before a host's own name for the same
+// thing, such a leftover would shadow a perfectly good connection and the
+// app would fail with a confusing "can't reach database server". These are
+// the example scaffolds we ship or are likely to meet; anything matching is
+// skipped loudly rather than trusted.
+const PLACEHOLDER_PATTERNS = [
+  /user:password@host/i,
+  /username:password@/i,
+  /:password@host/i,
+  /@host:5432\/dbname/i,
+  /YOUR-[A-Z-]*DOMAIN/i,
+  /replace-with/i,
+  /\/\/user:pass@/i,
+];
+
+function isPlaceholder(value) {
+  return PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(value));
+}
+
 function pick(env, names) {
   for (const name of names) {
     const value = env[name];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value !== "string" || !value.trim()) continue;
+    const trimmed = value.trim();
+    if (isPlaceholder(trimmed)) {
+      console.warn(
+        `[db-url] Ignoring ${name}: it still holds an example value, not a real ` +
+          `connection string. Delete it so it cannot shadow the real database.`
+      );
+      continue;
+    }
+    return trimmed;
   }
   return undefined;
 }
