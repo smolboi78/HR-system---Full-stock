@@ -58,7 +58,6 @@ CREATE TABLE "LeaveTypeMap" (
     "bucket" "LeaveBucket" NOT NULL,
     "zenhrTimeoffId" INTEGER,
     "zenhrName" TEXT,
-    "entitlementDays" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "LeaveTypeMap_pkey" PRIMARY KEY ("bucket")

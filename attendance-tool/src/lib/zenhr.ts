@@ -257,9 +257,43 @@ export interface ZenhrWorkShift {
   id: number;
   name: string;
   type: string;
-  work_shift_intervals?: { from_time?: string; to_time?: string }[];
+  // Weekday names, lowercase, e.g. ["friday", "saturday"]. This is where an
+  // employee's days off actually live - per shift, not per branch.
+  days_off?: string[];
   from_time?: string;
   to_time?: string;
+  // Note the singular key: ZenHR returns `work_shift_interval` in responses
+  // even though the create/update body takes `work_shift_intervals_attributes`.
+  work_shift_interval?: { from_time?: string; to_time?: string; required_hours?: number | null }[];
+  // Per-weekday overrides of the shift's hours.
+  work_exceptions?: { day?: string; from_time?: string; to_time?: string }[];
+}
+
+// ZenHR names days off; the engine works in Date#getUTCDay numbers.
+const WEEKDAY_NUMBERS: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+export function weekdayNumbers(dayNames: string[] | undefined): number[] {
+  if (!dayNames) return [];
+  return dayNames
+    .map((d) => WEEKDAY_NUMBERS[d.trim().toLowerCase()])
+    .filter((n): n is number => n !== undefined);
+}
+
+// A business mission is time recorded in ZenHR for someone who was working,
+// not leave - so it must never read as "on leave" and never be deducted.
+// Matched on ZenHR's class_name first, then on the leave type's name.
+export function isBusinessMission(timeoff: ZenhrTimeoff): boolean {
+  if (/businessmission|mission/i.test(timeoff.class_name ?? "")) return true;
+  const name = `${timeoff.name?.en ?? ""} ${timeoff.name?.ar ?? ""}`.toLowerCase();
+  return /business mission|mission|مأمورية|مهمة عمل/.test(name);
 }
 
 // ---------- Reads ----------

@@ -35,9 +35,9 @@ export interface Reason {
 }
 
 export interface Balances {
-  emergency: { entitlement: number; taken: number; remaining: number };
-  annual: { entitlement: number; taken: number; remaining: number };
-  total: number;
+  emergency: { usedThisYear: number };
+  annual: { usedThisYear: number };
+  remaining: { emergency: number | null; annual: number | null } | null;
 }
 
 export interface ReconcileResponse {

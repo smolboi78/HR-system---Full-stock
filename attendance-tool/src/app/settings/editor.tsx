@@ -8,7 +8,6 @@ interface LeaveType {
   bucket: Bucket;
   zenhrTimeoffId: number | null;
   zenhrName: string | null;
-  entitlementDays: number;
 }
 
 interface Reason {
@@ -63,7 +62,6 @@ export function SettingsEditor() {
         bucket,
         zenhrTimeoffId: null,
         zenhrName: null,
-        entitlementDays: 0,
       }
   );
 
@@ -111,15 +109,15 @@ export function SettingsEditor() {
         <h2>Leave types</h2>
         <p className="tiny muted">
           The Apply button writes a time-off transaction against one of these ZenHR leave types.
-          ZenHR&apos;s API exposes no balance endpoint, so a balance is shown as entitlement minus
-          the approved transactions of that type this year — keep the entitlement here current.
+          Balances and entitlements are not kept here — the review pane reads what each employee has
+          taken from ZenHR&apos;s own transactions. Mapping Business mission matters even though it
+          deducts nothing: it is how a mission day is recognised as worked rather than as leave.
         </p>
         <table style={{ marginTop: 16 }}>
           <thead>
             <tr>
               <th>Bucket</th>
               <th>ZenHR leave type</th>
-              <th>Entitlement (days/year)</th>
             </tr>
           </thead>
           <tbody>
@@ -158,18 +156,6 @@ export function SettingsEditor() {
                       }
                     />
                   )}
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    style={{ width: 90 }}
-                    value={lt.entitlementDays}
-                    onChange={(e) =>
-                      patchLeaveType(lt.bucket, { entitlementDays: Number(e.target.value) })
-                    }
-                  />
                 </td>
               </tr>
             ))}

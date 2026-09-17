@@ -43,13 +43,9 @@ async function main() {
   for (const bucket of Object.keys(BUCKET_NAME_HINTS) as (keyof typeof BUCKET_NAME_HINTS)[]) {
     await prisma.leaveTypeMap.upsert({
       where: { bucket: bucket as never },
-      create: {
-        bucket: bucket as never,
-        // Egypt's statutory emergency entitlement is the usual starting
-        // point; both are editable at /settings, and the 6->7 day
-        // entitlement bookkeeping is explicitly out of scope here.
-        entitlementDays: bucket === "EMERGENCY" ? 7 : bucket === "ANNUAL" ? 21 : 0,
-      },
+      // Only the bucket itself is seeded; which ZenHR leave type it maps to
+      // is chosen at /settings once ZenHR is connected.
+      create: { bucket: bucket as never },
       update: {},
     });
   }

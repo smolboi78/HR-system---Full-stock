@@ -104,10 +104,6 @@ model LeaveTypeMap {
   bucket          LeaveBucket @id
   zenhrTimeoffId  Int?
   zenhrName       String?
-  // ZenHR's public API exposes no balance endpoint, so the review pane
-  // derives a balance as (entitlement - approved transactions this year).
-  // Entitlement is editable here rather than hardcoded.
-  entitlementDays Float       @default(0)
   updatedAt       DateTime    @updatedAt
 }
 

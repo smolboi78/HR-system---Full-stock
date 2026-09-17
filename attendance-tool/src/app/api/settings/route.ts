@@ -36,7 +36,6 @@ const Body = z.object({
         bucket: z.enum(["EMERGENCY", "ANNUAL", "UNPAID", "BUSINESS_MISSION", "NONE"]),
         zenhrTimeoffId: z.number().int().nullish(),
         zenhrName: z.string().max(160).nullish(),
-        entitlementDays: z.number().min(0).max(365).optional(),
       })
     )
     .optional(),
@@ -74,7 +73,6 @@ export async function PUT(request: Request) {
     const data = {
       zenhrTimeoffId: rest.zenhrTimeoffId ?? null,
       zenhrName: rest.zenhrName ?? null,
-      ...(rest.entitlementDays !== undefined ? { entitlementDays: rest.entitlementDays } : {}),
     };
     await prisma.leaveTypeMap.upsert({
       where: { bucket },

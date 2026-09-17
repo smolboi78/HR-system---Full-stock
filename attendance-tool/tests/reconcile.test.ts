@@ -18,6 +18,7 @@ function employee(over: Partial<EngineEmployee> = {}): EngineEmployee {
     daysOff: [5, 6],
     zenhrEmployeeId: 9001,
     shiftLabel: "09:00 - 17:00",
+    daysOffFromShift: true,
     hiringDate: null,
     terminationDate: null,
     ...over,
@@ -95,6 +96,85 @@ describe("time off settles a day", () => {
       "2026-09-07",
       "2026-09-08",
     ]);
+  });
+});
+
+describe("business missions are worked time", () => {
+  const mission = (date: string) => ({
+    employmentNumber: "124",
+    from: date,
+    to: date,
+    timeoffId: 812,
+    timeoffName: "Business Mission",
+    status: "approved",
+    notes: "",
+  });
+
+  it("reads a mission-covered day as present, never as leave", () => {
+    const row = run({
+      timeoff: [mission("2026-09-08")],
+      businessMissionTimeoffIds: new Set([812]),
+    }).find((r) => r.date === "2026-09-08")!;
+    expect(row.state).toBe("PRESENT");
+    expect(row.timeoffName).toBe("Business Mission");
+    expect(row.suggestedReason).toBeNull();
+  });
+
+  it("still reads an ordinary leave type as leave", () => {
+    const row = run({
+      timeoff: [{ ...mission("2026-09-08"), timeoffId: 809, timeoffName: "Annual Vacation" }],
+      businessMissionTimeoffIds: new Set([812]),
+    }).find((r) => r.date === "2026-09-08")!;
+    expect(row.state).toBe("TIME_OFF");
+  });
+
+  it("counts a mission day as worked even when they also clocked in", () => {
+    const row = run({
+      timeoff: [mission("2026-09-07")],
+      businessMissionTimeoffIds: new Set([812]),
+      attendance: [
+        {
+          employmentNumber: "124",
+          date: "2026-09-07",
+          entryTime: "2026-09-07T06:00:00.000Z",
+          exitTime: "2026-09-07T10:00:00.000Z",
+          missingStatus: "complete",
+          suspicious: false,
+        },
+      ],
+    }).find((r) => r.date === "2026-09-07")!;
+    expect(row.state).toBe("PRESENT");
+    expect(row.detail).toContain("4h also clocked");
+  });
+});
+
+describe("days off follow the ZenHR shift", () => {
+  it("uses the shift's days off, not the roster default", () => {
+    // A shift that is off Sunday and Monday rather than Friday/Saturday.
+    const rows = reconcile({
+      from: "2026-09-06", // Sunday
+      to: "2026-09-07", // Monday
+      employees: [employee({ daysOff: [0, 1], daysOffFromShift: true })],
+      attendance: [],
+      timeoff: [],
+      visits: [],
+      today: TODAY,
+    });
+    expect(rows.map((r) => r.state)).toEqual(["DAY_OFF", "DAY_OFF"]);
+    expect(rows[0].detail).toBe("Day off on their ZenHR shift");
+  });
+
+  it("says so when it had to fall back to the roster default", () => {
+    const rows = reconcile({
+      from: "2026-09-11", // Friday
+      to: "2026-09-11",
+      employees: [employee({ daysOffFromShift: false })],
+      attendance: [],
+      timeoff: [],
+      visits: [],
+      today: TODAY,
+    });
+    expect(rows[0].detail).toContain("no ZenHR shift assigned");
   });
 });
 

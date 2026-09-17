@@ -447,9 +447,11 @@ function prettyState(state: Row["state"]): string {
 // Emergency first, annual once the emergency balance can't cover the day.
 export function defaultBucketFor(
   reason: Reason,
-  balances: { emergency: { remaining: number } } | undefined
+  balances: { remaining: { emergency: number | null } | null } | undefined
 ): Bucket {
   if (!reason.allowsToggle) return reason.defaultBucket;
-  const remaining = balances?.emergency.remaining ?? 0;
-  return remaining >= reason.defaultDays ? "EMERGENCY" : "ANNUAL";
+  // Emergency first. Annual is only pre-selected when ZenHR has actually
+  // said the emergency balance cannot cover the day.
+  const remaining = balances?.remaining?.emergency ?? null;
+  return remaining !== null && remaining < reason.defaultDays ? "ANNUAL" : "EMERGENCY";
 }

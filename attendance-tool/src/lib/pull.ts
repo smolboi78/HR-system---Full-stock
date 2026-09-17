@@ -29,10 +29,20 @@ export interface PullResult {
 }
 
 export interface BucketBalances {
-  emergency: { entitlement: number; taken: number; remaining: number };
-  annual: { entitlement: number; taken: number; remaining: number };
-  total: number;
+  // Days of each type ZenHR has approved for this employee this calendar
+  // year - real data, nothing for anyone to keep up to date.
+  emergency: { usedThisYear: number };
+  annual: { usedThisYear: number };
+  // The remaining balance as ZenHR holds it, when ZenHR gives it to us.
+  // ZenHR's documented API v3 exposes no per-leave-type balance endpoint
+  // (`timeoff_balance` exists only as a single figure on salary records), so
+  // this stays null until they confirm an endpoint for it. The review pane
+  // shows "from ZenHR" rather than a number this tool invented.
+  remaining: { emergency: number | null; annual: number | null } | null;
 }
+
+// The transaction statuses that mean a day is genuinely covered.
+const COVERING_STATUSES = new Set(["approved", "accepted", "taken", "active"]);
 
 function normaliseName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
@@ -88,12 +98,18 @@ export async function syncRosterWithZenhr(branchId: number): Promise<string[]> {
 // review pane ("09:00 - 17:00"). Shifts live on their own endpoints, not on
 // the attendance report, so this is a separate per-employee read - kept to
 // employees in the pass and cached for the request only.
-async function shiftLabels(
+export interface ShiftInfo {
+  label: string;
+  // Weekday numbers the shift has off, e.g. [5, 6] for Friday + Saturday.
+  daysOff: number[];
+}
+
+async function shiftInfo(
   branchId: number,
   employees: { employmentNumber: string; zenhrEmployeeId: number | null }[],
   warnings: string[]
-): Promise<Map<string, string>> {
-  const labels = new Map<string, string>();
+): Promise<Map<string, ShiftInfo>> {
+  const labels = new Map<string, ShiftInfo>();
   let workShifts: zenhr.ZenhrWorkShift[] = [];
   try {
     workShifts = await zenhr.listWorkShifts(branchId);
@@ -111,10 +127,15 @@ async function shiftLabels(
       if (!latest) continue;
       const shift = shiftById.get(latest.work_shift.id);
       if (!shift) continue;
-      const interval = shift.work_shift_intervals?.[0];
+      // Responses carry the singular `work_shift_interval`; fall back to the
+      // shift's own from/to when it has no intervals.
+      const interval = shift.work_shift_interval?.[0];
       const from = interval?.from_time ?? shift.from_time;
       const to = interval?.to_time ?? shift.to_time;
-      labels.set(emp.employmentNumber, from && to ? `${from} - ${to}` : shift.name);
+      labels.set(emp.employmentNumber, {
+        label: from && to ? `${from} - ${to}` : shift.name,
+        daysOff: zenhr.weekdayNumbers(shift.days_off),
+      });
     } catch (err) {
       warnings.push(
         `Could not read the shift assignment for ${emp.employmentNumber}: ${(err as Error).message}`
@@ -124,63 +145,44 @@ async function shiftLabels(
   return labels;
 }
 
-// ZenHR exposes no leave-balance endpoint, so a balance is derived:
-// entitlement (editable at /settings) minus approved transactions of that
-// leave type in the calendar year.
-async function deriveBalances(
+// What each employee has actually taken of each type this year, straight
+// from ZenHR's own approved transactions. Deliberately not entitlement
+// minus usage: an entitlement figure kept inside this tool would drift from
+// ZenHR and quietly mislead the Emergency/Annual decision.
+async function readBalances(
   branchId: number,
   employees: { employmentNumber: string; zenhrEmployeeId: number | null }[],
   year: number,
   warnings: string[]
 ): Promise<Record<string, BucketBalances>> {
   const maps = await prisma.leaveTypeMap.findMany();
-  const emergency = maps.find((m) => m.bucket === "EMERGENCY");
-  const annual = maps.find((m) => m.bucket === "ANNUAL");
+  const emergencyId = maps.find((m) => m.bucket === "EMERGENCY")?.zenhrTimeoffId ?? null;
+  const annualId = maps.find((m) => m.bucket === "ANNUAL")?.zenhrTimeoffId ?? null;
 
-  const out: Record<string, BucketBalances> = {};
   let transactions: zenhr.ZenhrTimeoffTransaction[] = [];
   try {
-    transactions = await zenhr.listTimeoffTransactions(
-      branchId,
-      `${year}-01-01`,
-      `${year}-12-31`
-    );
+    transactions = await zenhr.listTimeoffTransactions(branchId, `${year}-01-01`, `${year}-12-31`);
   } catch (err) {
-    warnings.push(`Could not read this year's time-off transactions for balances: ${(err as Error).message}`);
+    warnings.push(`Could not read this year's time-off transactions: ${(err as Error).message}`);
   }
 
-  const takenByEmployeeAndType = new Map<string, number>();
+  const usedByEmployeeAndType = new Map<string, number>();
   for (const t of transactions) {
-    if (!["approved", "accepted", "taken", "active"].includes(t.status.toLowerCase())) continue;
+    if (!COVERING_STATUSES.has(t.status.toLowerCase())) continue;
     const k = `${t.employee.id}|${t.timeoff.id}`;
-    takenByEmployeeAndType.set(k, (takenByEmployeeAndType.get(k) ?? 0) + (t.amount ?? 0));
+    usedByEmployeeAndType.set(k, (usedByEmployeeAndType.get(k) ?? 0) + (t.amount ?? 0));
   }
 
+  const out: Record<string, BucketBalances> = {};
   for (const emp of employees) {
-    const taken = (timeoffId: number | null | undefined) =>
+    const used = (timeoffId: number | null) =>
       emp.zenhrEmployeeId && timeoffId
-        ? takenByEmployeeAndType.get(`${emp.zenhrEmployeeId}|${timeoffId}`) ?? 0
+        ? usedByEmployeeAndType.get(`${emp.zenhrEmployeeId}|${timeoffId}`) ?? 0
         : 0;
-
-    const emergencyTaken = taken(emergency?.zenhrTimeoffId);
-    const annualTaken = taken(annual?.zenhrTimeoffId);
-    const emergencyEntitlement = emergency?.entitlementDays ?? 0;
-    const annualEntitlement = annual?.entitlementDays ?? 0;
-
     out[emp.employmentNumber] = {
-      emergency: {
-        entitlement: emergencyEntitlement,
-        taken: emergencyTaken,
-        remaining: Math.round((emergencyEntitlement - emergencyTaken) * 100) / 100,
-      },
-      annual: {
-        entitlement: annualEntitlement,
-        taken: annualTaken,
-        remaining: Math.round((annualEntitlement - annualTaken) * 100) / 100,
-      },
-      total:
-        Math.round((emergencyEntitlement - emergencyTaken + annualEntitlement - annualTaken) * 100) /
-        100,
+      emergency: { usedThisYear: used(emergencyId) },
+      annual: { usedThisYear: used(annualId) },
+      remaining: null,
     };
   }
   return out;
@@ -301,23 +303,51 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
   }
 
   // --- Shifts and balances ---
-  const shifts = options.includeShifts === false
-    ? new Map<string, string>()
-    : await shiftLabels(branchId, roster, warnings);
-  const balances = await deriveBalances(branchId, roster, Number(to.slice(0, 4)), warnings);
+  const shifts =
+    options.includeShifts === false
+      ? new Map<string, ShiftInfo>()
+      : await shiftInfo(branchId, roster, warnings);
+  const balances = await readBalances(branchId, roster, Number(to.slice(0, 4)), warnings);
 
-  const employees: EngineEmployee[] = roster.map((r) => ({
-    employmentNumber: r.employmentNumber,
-    nameEn: r.nameEn,
-    role: r.role,
-    tracking: r.tracking,
-    excluded: r.excluded,
-    daysOff: r.daysOff,
-    zenhrEmployeeId: r.zenhrEmployeeId,
-    shiftLabel: shifts.get(r.employmentNumber) ?? null,
-    hiringDate: null,
-    terminationDate: null,
-  }));
+  // Which leave types count as a business mission, so a day covered by one
+  // reads as worked rather than as leave.
+  const businessMissionTimeoffIds = new Set(
+    timeoffTypes.filter((t) => zenhr.isBusinessMission(t)).map((t) => t.id)
+  );
+  const mappedMission = await prisma.leaveTypeMap.findUnique({
+    where: { bucket: "BUSINESS_MISSION" },
+  });
+  if (mappedMission?.zenhrTimeoffId) businessMissionTimeoffIds.add(mappedMission.zenhrTimeoffId);
+
+  const employees: EngineEmployee[] = roster.map((r) => {
+    const shift = shifts.get(r.employmentNumber);
+    // Days off come from the employee's ZenHR shift. The roster column is
+    // only a fallback for someone with no shift assigned, and the row says
+    // which one was used so a wrong day off is traceable.
+    const fromShift = (shift?.daysOff.length ?? 0) > 0;
+    return {
+      employmentNumber: r.employmentNumber,
+      nameEn: r.nameEn,
+      role: r.role,
+      tracking: r.tracking,
+      excluded: r.excluded,
+      daysOff: fromShift ? (shift as ShiftInfo).daysOff : r.daysOff,
+      daysOffFromShift: fromShift,
+      zenhrEmployeeId: r.zenhrEmployeeId,
+      shiftLabel: shift?.label ?? null,
+      hiringDate: null,
+      terminationDate: null,
+    };
+  });
+
+  for (const r of roster) {
+    if (r.excluded || !r.zenhrEmployeeId) continue;
+    if (!shifts.get(r.employmentNumber)) {
+      warnings.push(
+        `${r.employmentNumber} ${r.nameEn} has no shift assigned in ZenHR, so their days off fall back to the roster default.`
+      );
+    }
+  }
 
   const appliedRows = await prisma.appliedDeduction.findMany({
     where: {
@@ -339,6 +369,7 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
     visits,
     alreadyApplied,
     businessMissionEmployee: BUSINESS_MISSION_EMPLOYEE,
+    businessMissionTimeoffIds,
     today: toDateStr(new Date()),
   });
 

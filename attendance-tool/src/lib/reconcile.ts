@@ -23,6 +23,10 @@ export interface EngineEmployee {
   daysOff: number[];
   zenhrEmployeeId: number | null;
   shiftLabel: string | null; // e.g. "09:00 - 17:00", from the ZenHR shift assignment
+  // Weekday numbers off, taken from the employee's assigned ZenHR work
+  // shift. daysOffFromShift says whether that is what happened, or whether
+  // no shift was assigned and this fell back to the roster's default.
+  daysOffFromShift: boolean;
   hiringDate: DateStr | null;
   terminationDate: DateStr | null;
 }
@@ -109,6 +113,9 @@ export interface ReconcileInput {
   // drop out of the queue so a second pass cannot double-charge.
   alreadyApplied?: Set<string>;
   businessMissionEmployee?: string;
+  // ZenHR leave-type ids that represent a business mission. A day covered by
+  // one of these was worked: it is never leave and never deducted.
+  businessMissionTimeoffIds?: Set<number>;
   today?: DateStr;
 }
 
@@ -228,11 +235,19 @@ export function reconcile(input: ReconcileInput): ResolvedRow[] {
         (t) => coversDay(t, date) && COVERING_TIMEOFF_STATUSES.has(t.status.toLowerCase())
       );
       if (covering) {
+        // A business mission is working time, not leave. It resolves as
+        // present with the mission named, and nothing is ever charged for it
+        // - whether or not the person also clocked in that day.
+        const isMission = input.businessMissionTimeoffIds?.has(covering.timeoffId) ?? false;
         rows.push({
           ...base,
-          state: "TIME_OFF",
+          state: isMission ? "PRESENT" : "TIME_OFF",
           timeoffName: covering.timeoffName,
-          detail: `Covered by an approved ${covering.timeoffName} transaction in ZenHR`,
+          detail: isMission
+            ? `Working: ${covering.timeoffName} filed in ZenHR${
+                base.workedHours !== null ? `, ${base.workedHours}h also clocked` : ""
+              }`
+            : `Covered by an approved ${covering.timeoffName} transaction in ZenHR`,
         });
         continue;
       }
@@ -245,7 +260,13 @@ export function reconcile(input: ReconcileInput): ResolvedRow[] {
         continue;
       }
       if (emp.daysOff.includes(weekday(date))) {
-        rows.push({ ...base, state: "DAY_OFF", detail: "Weekly day off" });
+        rows.push({
+          ...base,
+          state: "DAY_OFF",
+          detail: emp.daysOffFromShift
+            ? "Day off on their ZenHR shift"
+            : "Weekly day off (no ZenHR shift assigned - roster default)",
+        });
         continue;
       }
 
@@ -328,7 +349,7 @@ export function reconcile(input: ReconcileInput): ResolvedRow[] {
         ...base,
         state: "EXCEPTION",
         detail: isMissionFiler
-          ? "No ZenHR record and no time-off transaction - expected a Business Mission entry"
+          ? "No ZenHR record and no Business Mission filed - he files one whenever he is out, so this is a missing entry rather than a likely absence"
           : "No ZenHR record and no time-off transaction",
         suggestedReason: isMissionFiler ? "BUSINESS_MISSION" : "FULL_DAY_ABSENCE",
       });

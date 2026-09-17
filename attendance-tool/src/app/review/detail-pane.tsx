@@ -25,11 +25,14 @@ export function DetailPane({
   const reason = draft.reasonCode ? reasons.find((r) => r.code === draft.reasonCode) : undefined;
   const bucket: Bucket = draft.bucket ?? reason?.defaultBucket ?? "NONE";
   const deducts = Boolean(reason && bucket !== "NONE" && reason.defaultDays > 0);
+  const emergencyRemaining = balances?.remaining?.emergency ?? null;
+  // Only warn when ZenHR has actually told us the balance. Guessing from an
+  // entitlement kept in this tool would be worse than saying nothing.
   const shortOfBalance =
     deducts &&
     bucket === "EMERGENCY" &&
-    balances !== undefined &&
-    balances.emergency.remaining < (reason?.defaultDays ?? 0);
+    emergencyRemaining !== null &&
+    emergencyRemaining < (reason?.defaultDays ?? 0);
 
   return (
     <section className="card">
@@ -74,15 +77,28 @@ export function DetailPane({
 
       <div className="facts" style={{ marginTop: 0 }}>
         <Fact
-          k="Emergency balance"
-          v={balances ? `${balances.emergency.remaining} of ${balances.emergency.entitlement} days` : "Unknown"}
+          k="Emergency"
+          v={balanceText(balances?.emergency.usedThisYear, balances?.remaining?.emergency)}
         />
         <Fact
-          k="Annual balance"
-          v={balances ? `${balances.annual.remaining} of ${balances.annual.entitlement} days` : "Unknown"}
+          k="Annual"
+          v={balanceText(balances?.annual.usedThisYear, balances?.remaining?.annual)}
         />
-        <Fact k="Both together" v={balances ? `${balances.total} days` : "Unknown"} />
+        <Fact
+          k="Both together"
+          v={
+            balances
+              ? `${round(balances.emergency.usedThisYear + balances.annual.usedThisYear)} days taken this year`
+              : "Unknown"
+          }
+        />
       </div>
+      {balances?.remaining === null && (
+        <p className="tiny muted" style={{ marginTop: 2 }}>
+          Days taken come from ZenHR&apos;s own approved transactions. Remaining balance is only
+          shown once ZenHR exposes it — check the employee in ZenHR if the balance decides the call.
+        </p>
+      )}
 
       <hr className="divider" />
 
@@ -99,11 +115,13 @@ export function DetailPane({
                 reasonCode: code,
                 // Re-seed the toggle from the new reason, preferring
                 // emergency while it can still cover the day.
+                // Emergency first, as the rules say; it only pre-selects
+                // annual when ZenHR has told us emergency cannot cover it.
                 bucket: picked
                   ? picked.allowsToggle
-                    ? (balances?.emergency.remaining ?? 0) >= picked.defaultDays
-                      ? "EMERGENCY"
-                      : "ANNUAL"
+                    ? emergencyRemaining !== null && emergencyRemaining < picked.defaultDays
+                      ? "ANNUAL"
+                      : "EMERGENCY"
                     : picked.defaultBucket
                   : null,
               });
@@ -177,8 +195,8 @@ export function DetailPane({
 
       {shortOfBalance && (
         <div className="notice warn" style={{ marginTop: 12 }}>
-          Emergency balance is down to {balances?.emergency.remaining} days — this would take it
-          negative. Switch the charge to annual leave, or apply it knowing it exceeds the balance.
+          ZenHR has this employee down to {emergencyRemaining} days of emergency leave — this would
+          take it negative. Switch the charge to annual, or apply it knowing it exceeds the balance.
         </div>
       )}
 
@@ -190,6 +208,18 @@ export function DetailPane({
       </div>
     </section>
   );
+}
+
+function round(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function balanceText(used: number | undefined, remaining: number | null | undefined): string {
+  if (used === undefined) return "Unknown";
+  const taken = `${round(used)} days taken this year`;
+  return remaining === null || remaining === undefined
+    ? taken
+    : `${remaining} days left · ${taken}`;
 }
 
 function effectiveDays(reason: Reason, draft: Draft): number {
