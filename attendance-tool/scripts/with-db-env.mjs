@@ -21,26 +21,42 @@ const pick = (...names) => {
 };
 
 // Pooled, for the app itself.
+//
+// The STORAGE_* names are what Vercel's Neon integration creates when the
+// variable prefix is left at its "STORAGE" default. DB_URL_PREFIX lets any
+// other prefix be named without another release.
+const prefix = process.env.DB_URL_PREFIX?.trim().replace(/_+$/, "");
+const prefixed = (suffix) => (prefix ? [`${prefix}_${suffix}`] : []);
+
 const pooled = pick(
+  ...prefixed("URL"),
   "DATABASE_URL",
   "POSTGRES_PRISMA_URL",
   "POSTGRES_URL",
-  "DATABASE_URL_POOLED"
+  "DATABASE_URL_POOLED",
+  "STORAGE_PRISMA_URL",
+  "STORAGE_URL"
 );
 
 // Direct, for migrations. Falls back to the pooled URL, which is fine for
 // a plain Postgres with no pooler in front of it.
 const direct = pick(
+  ...prefixed("URL_UNPOOLED"),
+  ...prefixed("URL_NON_POOLING"),
   "DIRECT_URL",
   "DATABASE_URL_UNPOOLED",
   "POSTGRES_URL_NON_POOLING",
-  "DATABASE_DIRECT_URL"
+  "DATABASE_DIRECT_URL",
+  "STORAGE_URL_UNPOOLED",
+  "STORAGE_URL_NON_POOLING"
 );
 
 if (!pooled) {
   console.error(
-    "No database URL found. Set DATABASE_URL (or connect a Postgres integration, " +
-      "which provides POSTGRES_PRISMA_URL / POSTGRES_URL)."
+    "No database URL found. Set DATABASE_URL, or connect a Postgres integration - " +
+      "POSTGRES_PRISMA_URL, POSTGRES_URL and Vercel/Neon's STORAGE_* names are all " +
+      "recognised. For any other prefix, set DB_URL_PREFIX to it (e.g. DB_URL_PREFIX=MYDB " +
+      "for MYDB_URL / MYDB_URL_UNPOOLED)."
   );
   process.exit(1);
 }
