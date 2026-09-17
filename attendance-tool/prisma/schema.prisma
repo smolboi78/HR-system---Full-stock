@@ -1,0 +1,142 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- ZenHR OAuth ----------
+
+// Single-row table holding the current OAuth tokens. Bootstrapped once via
+// /admin/connect-zenhr, refreshed automatically afterwards.
+model ZenhrOAuthToken {
+  id           String   @id @default("default")
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  scope        String
+  updatedAt    DateTime @updatedAt
+}
+
+// ---------- Roster (standing, editable in-tool) ----------
+
+// How an employee's attendance is judged. HOURS = duration from ZenHR
+// matters; PRESENCE = present in either system is enough; DELIVERY =
+// ZenHR hours are the record, Bricks visits are a reference signal only.
+enum TrackingMethod {
+  HOURS
+  PRESENCE
+  DELIVERY
+}
+
+// The standing roster, baked in so the tool can catch an employee missing
+// from ZenHR's response entirely rather than silently skipping them.
+// Seeded from the ZenHR org export dated 2026-09-17; editable at /roster.
+model RosterEmployee {
+  // Full Stock employment number (the "ID" column of the roster) - the
+  // stable business key people use day to day.
+  employmentNumber String         @id
+  nameEn           String
+  role             String
+  tracking         TrackingMethod
+  // Excluded employees are carried on the roster (so they stay visible and
+  // editable) but never produce attendance rows or deductions.
+  excluded         Boolean        @default(false)
+  // Weekday numbers ZenHR/Full Stock treat as days off, 0 = Sunday.
+  // Egypt default is Friday + Saturday.
+  daysOff          Int[]          @default([5, 6])
+  // Set once ZenHR is synced: its internal numeric employee id, needed for
+  // every per-employee read and for the write endpoint.
+  zenhrEmployeeId  Int?
+  zenhrBranchId    Int?
+  // Bricks logs delivery agents (and some sales staff) under a different,
+  // usually shortened name - matched via this fixed alias, never fuzzily.
+  bricksAlias      String?
+  bricksOwnerId    String?
+  active           Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([zenhrEmployeeId])
+}
+
+// ---------- Reasons (standing, editable, colour-coded) ----------
+
+// Which balance a reason draws from when applied. NONE = informational
+// reason that creates no ZenHR transaction.
+enum LeaveBucket {
+  EMERGENCY
+  ANNUAL
+  UNPAID
+  BUSINESS_MISSION
+  NONE
+}
+
+model Reason {
+  code String @id // e.g. FULL_DAY_ABSENCE
+  label String
+  color String // hex, used for the row chip
+
+  // Bucket this reason deducts from by default, and whether the reviewer is
+  // offered the Emergency/Annual toggle on the row.
+  defaultBucket LeaveBucket @default(NONE)
+  allowsToggle  Boolean     @default(false)
+
+  // Days deducted per occurrence (0.5 for a missing checkout, 1 for a full
+  // day). Ignored when defaultBucket is NONE.
+  defaultDays Float @default(0)
+
+  // Business Mission rows carry editable hours instead of a fixed day.
+  hoursEditable Boolean @default(false)
+
+  sortOrder Int     @default(0)
+  active    Boolean @default(true)
+}
+
+// ---------- Leave type mapping + balances ----------
+
+// Maps our four buckets onto the branch's real ZenHR timeoff ids, which is
+// what the write endpoint takes. Resolved from GET /timeoffs by name on
+// first sync, overridable at /settings when a name doesn't match.
+model LeaveTypeMap {
+  bucket          LeaveBucket @id
+  zenhrTimeoffId  Int?
+  zenhrName       String?
+  // ZenHR's public API exposes no balance endpoint, so the review pane
+  // derives a balance as (entitlement - approved transactions this year).
+  // Entitlement is editable here rather than hardcoded.
+  entitlementDays Float       @default(0)
+  updatedAt       DateTime    @updatedAt
+}
+
+// ---------- Applied deductions (audit + idempotency) ----------
+
+enum ApplyStatus {
+  APPLIED
+  FAILED
+}
+
+// One row per day we pushed to ZenHR. The unique key on
+// (employmentNumber, date) is what stops a second Apply pass from
+// double-charging somebody's emergency balance.
+model AppliedDeduction {
+  id               String      @id @default(cuid())
+  employmentNumber String
+  date             DateTime    @db.Date
+  reasonCode       String
+  bucket           LeaveBucket
+  days             Float
+  note             String?
+  status           ApplyStatus @default(APPLIED)
+  // ZenHR's id for the created timeoff transaction request, when it
+  // returned one - the receipt for this deduction.
+  zenhrTransactionId Int?
+  errorMessage       String?
+  appliedBy          String?
+  appliedAt          DateTime  @default(now())
+
+  @@unique([employmentNumber, date])
+  @@index([date])
+}

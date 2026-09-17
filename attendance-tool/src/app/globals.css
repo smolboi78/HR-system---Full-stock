@@ -1,0 +1,372 @@
+/* Typography-first, soft-edged, calm. Deliberately not the dense bordered
+   card grid of the earlier HTML version: generous whitespace, one accent,
+   corners rounded enough to read as soft rather than boxy. */
+
+:root {
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --surface-sunken: #f1efea;
+  --ink: #23231f;
+  --ink-soft: #6b6a63;
+  --ink-faint: #9b9a92;
+  --line: #e6e3dc;
+  --accent: #4a7d6f;
+  --accent-soft: #e8f0ed;
+  --warn: #c98a2e;
+  --warn-soft: #fbf2e2;
+  --alert: #c4564a;
+  --alert-soft: #fbeae7;
+  --radius-lg: 20px;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 1px 2px rgba(35, 35, 31, 0.04), 0 8px 24px rgba(35, 35, 31, 0.05);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans Arabic", sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+h1 {
+  font-size: 1.55rem;
+}
+h2 {
+  font-size: 1.1rem;
+}
+h3 {
+  font-size: 0.95rem;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 28px 88px;
+}
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.nav {
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+}
+
+.nav a {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+.nav a.active {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.lede {
+  color: var(--ink-soft);
+  margin: 6px 0 32px;
+  max-width: 62ch;
+}
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 26px 28px;
+  margin-bottom: 22px;
+}
+
+.card.quiet {
+  box-shadow: none;
+  background: var(--surface-sunken);
+}
+
+.row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+label {
+  display: block;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 6px;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+}
+
+button {
+  font: inherit;
+  font-weight: 550;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 9px 20px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+button.subtle {
+  background: var(--surface-sunken);
+  color: var(--ink);
+}
+
+.stats {
+  display: flex;
+  gap: 34px;
+  flex-wrap: wrap;
+}
+
+.stat .value {
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.stat .label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+}
+
+.queue {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) 1fr;
+  gap: 22px;
+  align-items: start;
+}
+
+@media (max-width: 880px) {
+  .queue {
+    grid-template-columns: 1fr;
+  }
+}
+
+.list {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 14px 18px;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.item:last-child {
+  border-bottom: none;
+}
+
+.item.selected {
+  background: var(--accent-soft);
+}
+
+.item .who {
+  font-weight: 550;
+}
+
+.item .when {
+  color: var(--ink-faint);
+  font-size: 0.82rem;
+}
+
+.item input[type="checkbox"] {
+  margin-top: 4px;
+  accent-color: var(--accent);
+}
+
+.chip {
+  display: inline-block;
+  font-size: 0.74rem;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.chip.alert {
+  background: var(--alert-soft);
+  color: var(--alert);
+}
+.chip.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.chip.calm {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 18px 26px;
+  margin: 20px 0 6px;
+}
+
+.fact .k {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+}
+
+.fact .v {
+  font-variant-numeric: tabular-nums;
+}
+
+.divider {
+  height: 1px;
+  background: var(--line);
+  margin: 22px 0;
+  border: none;
+}
+
+.notice {
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  font-size: 0.9rem;
+}
+
+.notice.warn {
+  background: var(--warn-soft);
+  color: #7a5313;
+}
+.notice.alert {
+  background: var(--alert-soft);
+  color: #8a2f25;
+}
+.notice.calm {
+  background: var(--accent-soft);
+  color: #2c5348;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th {
+  text-align: left;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+  font-weight: 500;
+  padding: 0 12px 10px 0;
+}
+
+td {
+  padding: 10px 12px 10px 0;
+  border-top: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.empty {
+  color: var(--ink-soft);
+  padding: 28px;
+  text-align: center;
+}
+
+.muted {
+  color: var(--ink-soft);
+}
+
+.tiny {
+  font-size: 0.82rem;
+}

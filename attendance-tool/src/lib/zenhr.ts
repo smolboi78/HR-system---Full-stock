@@ -1,0 +1,357 @@
+import { prisma } from "./db";
+import type { DateStr } from "./dates";
+
+// ZenHR API v3 client - reads and the one write this tool makes.
+//
+// Auth: OAuth 2.0. authorization_code once via /admin/connect-zenhr, then
+// refresh_token forever after. Rate limit is 15 req / 4s in production, so
+// paginated reads pause briefly between pages.
+//
+// Endpoint shapes below were taken from ZenHR's published API collection
+// (https://api-docs.zenhr.com). Worth knowing, because the spec assumed a
+// single "accumulative attendance report": no such endpoint exists. What it
+// describes is composed here from two reads - attendance_records (the clock
+// data) and timeoff_transactions (the approved leave covering a day).
+
+const PROTOCOL = process.env.ZENHR_PROTOCOL || "https";
+const SCOPES =
+  process.env.ZENHR_SCOPES ||
+  "read:employee read:branch read:attendance_record read:timeoff write:timeoff";
+
+function env(name: string): string {
+  return process.env[name] || "";
+}
+
+function apiOrigin(): string {
+  // e.g. "app.zenhr.com"
+  return `${PROTOCOL}://${env("ZENHR_BASE_URL") || "app.zenhr.com"}`;
+}
+
+export function getAuthorizeUrl(state: string): string {
+  const url = new URL(`${apiOrigin()}/oauth/authorize`);
+  url.searchParams.set("client_id", env("ZENHR_CLIENT_ID"));
+  url.searchParams.set("redirect_uri", env("ZENHR_REDIRECT_URI"));
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", SCOPES);
+  url.searchParams.set("state", state);
+  return url.toString();
+}
+
+interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  scope?: string;
+}
+
+async function requestToken(body: Record<string, string>): Promise<TokenResponse> {
+  const res = await fetch(`${apiOrigin()}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(body).toString(),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `ZenHR token request failed (${res.status}): ${await res.text().catch(() => "")}`
+    );
+  }
+  return res.json();
+}
+
+async function saveToken(token: TokenResponse) {
+  const data = {
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token,
+    expiresAt: new Date(Date.now() + token.expires_in * 1000),
+    scope: token.scope || SCOPES,
+  };
+  await prisma.zenhrOAuthToken.upsert({
+    where: { id: "default" },
+    create: { id: "default", ...data },
+    update: data,
+  });
+}
+
+export async function exchangeCodeForToken(code: string) {
+  const token = await requestToken({
+    grant_type: "authorization_code",
+    code,
+    client_id: env("ZENHR_CLIENT_ID"),
+    client_secret: env("ZENHR_CLIENT_SECRET"),
+    redirect_uri: env("ZENHR_REDIRECT_URI"),
+  });
+  await saveToken(token);
+  return token;
+}
+
+const EXPIRY_BUFFER_MS = 60_000;
+
+async function accessToken(): Promise<string> {
+  const stored = await prisma.zenhrOAuthToken.findUnique({ where: { id: "default" } });
+  if (!stored) {
+    throw new Error(
+      "ZenHR is not connected yet - open /admin/connect-zenhr once to authorise the integration."
+    );
+  }
+  if (stored.expiresAt.getTime() - EXPIRY_BUFFER_MS > Date.now()) return stored.accessToken;
+
+  const refreshed = await requestToken({
+    grant_type: "refresh_token",
+    refresh_token: stored.refreshToken,
+    client_id: env("ZENHR_CLIENT_ID"),
+    client_secret: env("ZENHR_CLIENT_SECRET"),
+  });
+  await saveToken(refreshed);
+  return refreshed.access_token;
+}
+
+export function isConnected(): Promise<boolean> {
+  return prisma.zenhrOAuthToken.findUnique({ where: { id: "default" } }).then(Boolean);
+}
+
+type Query = Record<string, string | number | undefined | (string | number)[]>;
+
+function buildUrl(path: string, query: Query): string {
+  const url = new URL(`${apiOrigin()}${path}`);
+  for (const [k, v] of Object.entries(query)) {
+    if (v === undefined) continue;
+    if (Array.isArray(v)) for (const item of v) url.searchParams.append(k, String(item));
+    else url.searchParams.set(k, String(v));
+  }
+  return url.toString();
+}
+
+async function apiGet<T>(path: string, query: Query = {}): Promise<T> {
+  const res = await fetch(buildUrl(path, query), {
+    headers: { Authorization: `Bearer ${await accessToken()}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(
+      `ZenHR GET ${path} failed (${res.status}): ${await res.text().catch(() => "")}`
+    );
+  }
+  return res.json();
+}
+
+// The write endpoint takes multipart/form-data, not JSON - see
+// "Create Timeoff Transaction Request" in ZenHR's collection.
+async function apiPostForm<T>(path: string, fields: Record<string, string>): Promise<T> {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+
+  const res = await fetch(`${apiOrigin()}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${await accessToken()}` },
+    body: form,
+  });
+  const text = await res.text().catch(() => "");
+  if (!res.ok) {
+    throw new Error(`ZenHR POST ${path} failed (${res.status}): ${text}`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+interface ListResponse<T> {
+  pagination: { current_page: number; per_page: number; total_entries: number; total_pages: number };
+  data: T[];
+}
+
+async function fetchAllPages<T>(path: string, query: Query = {}, pageDelayMs = 300): Promise<T[]> {
+  const all: T[] = [];
+  let page = 1;
+  while (true) {
+    const resp = await apiGet<ListResponse<T>>(path, { ...query, page, limit: 200 });
+    all.push(...(resp.data ?? []));
+    const totalPages = resp.pagination?.total_pages ?? 1;
+    if (page >= totalPages) break;
+    page += 1;
+    await sleep(pageDelayMs);
+  }
+  return all;
+}
+
+// ---------- Types (only the fields this tool reads) ----------
+
+export interface ZenhrBranch {
+  id: number;
+  name: { en: string; ar: string } | string;
+  timezone?: string;
+  working_hours?: number;
+  days_off?: string[];
+}
+
+export interface ZenhrEmployee {
+  id: number;
+  branch_id: number;
+  employment_number: string;
+  active: boolean;
+  hiring_date: string | null;
+  termination_date: string | null;
+  user: {
+    id: number;
+    short_name?: { en?: string; ar?: string };
+    name?: {
+      en?: { first_name?: string; second_name?: string; third_name?: string; last_name?: string };
+    };
+  };
+}
+
+export function employeeNameEn(emp: ZenhrEmployee): string {
+  if (emp.user?.short_name?.en) return emp.user.short_name.en;
+  const n = emp.user?.name?.en;
+  return [n?.first_name, n?.second_name, n?.third_name, n?.last_name]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
+export interface ZenhrAttendanceRecord {
+  id: number;
+  employee: { id: number; employment_number: number | string | null };
+  attendance_date: DateStr;
+  entry_time: string | null;
+  exit_time: string | null;
+  first_in: string | null;
+  last_out: string | null;
+  work_shift_id: number | null;
+  missing_status: string; // "complete" | "missing_out" | ...
+  number_of_missings: number;
+  suspicious: boolean;
+}
+
+export interface ZenhrTimeoffTransaction {
+  id: number;
+  employee: { id: number };
+  timeoff: { id: number };
+  from_date: string; // ISO datetime
+  to_date: string;
+  amount: number;
+  notes: string;
+  status: string; // "approved" | "pending" | "cancelled" | "withdrawn" | ...
+  class_name: string;
+}
+
+export interface ZenhrTimeoff {
+  id: number;
+  name: { en: string; ar: string };
+  class_name: string;
+  accumulative: boolean;
+}
+
+export interface ZenhrEmployeeShift {
+  id: number;
+  employee: { id: number };
+  work_shift: { id: number };
+  from_date: string;
+  to_date: string;
+}
+
+export interface ZenhrWorkShift {
+  id: number;
+  name: string;
+  type: string;
+  work_shift_intervals?: { from_time?: string; to_time?: string }[];
+  from_time?: string;
+  to_time?: string;
+}
+
+// ---------- Reads ----------
+
+export function listBranches(): Promise<ZenhrBranch[]> {
+  return fetchAllPages<ZenhrBranch>("/api/v3/branches");
+}
+
+export function listEmployees(branchId: number): Promise<ZenhrEmployee[]> {
+  return fetchAllPages<ZenhrEmployee>(`/api/v3/branches/${branchId}/employees`);
+}
+
+export function listAttendanceRecords(
+  branchId: number,
+  from: DateStr,
+  to: DateStr
+): Promise<ZenhrAttendanceRecord[]> {
+  return fetchAllPages<ZenhrAttendanceRecord>(`/api/v3/branches/${branchId}/attendance_records`, {
+    "filter[attendance_date][from]": from,
+    "filter[attendance_date][to]": to,
+  });
+}
+
+// Any transaction that overlaps the window: it may have started before
+// `from` (a week of annual leave spanning the range boundary) and still
+// cover days inside it, so the filter is on to_date >= from.
+export function listTimeoffTransactions(
+  branchId: number,
+  from: DateStr,
+  to: DateStr
+): Promise<ZenhrTimeoffTransaction[]> {
+  return fetchAllPages<ZenhrTimeoffTransaction>(
+    `/api/v3/branches/${branchId}/timeoff_transactions`,
+    { "filter[to_date][from]": from, "filter[from_date][to]": to }
+  );
+}
+
+export function listTimeoffs(branchId: number): Promise<ZenhrTimeoff[]> {
+  return fetchAllPages<ZenhrTimeoff>(`/api/v3/branches/${branchId}/timeoffs`);
+}
+
+export function listEmployeeTimeoffTransactions(
+  branchId: number,
+  employeeId: number,
+  from: DateStr,
+  to: DateStr
+): Promise<ZenhrTimeoffTransaction[]> {
+  return fetchAllPages<ZenhrTimeoffTransaction>(
+    `/api/v3/branches/${branchId}/employees/${employeeId}/timeoff_transactions`,
+    { "filter[from_date][from]": from, "filter[from_date][to]": to }
+  );
+}
+
+export function listEmployeeShifts(
+  branchId: number,
+  employeeId: number
+): Promise<ZenhrEmployeeShift[]> {
+  return fetchAllPages<ZenhrEmployeeShift>(
+    `/api/v3/branches/${branchId}/employees/${employeeId}/employee_shifts`
+  );
+}
+
+export function listWorkShifts(branchId: number): Promise<ZenhrWorkShift[]> {
+  return fetchAllPages<ZenhrWorkShift>(`/api/v3/branches/${branchId}/work_shifts`, {
+    "include[]": "work_shift.work_shift_intervals",
+  });
+}
+
+// ---------- The one write ----------
+
+export interface CreateTimeoffRequestInput {
+  branchId: number;
+  employeeId: number;
+  timeoffId: number;
+  fromDate: DateStr;
+  toDate: DateStr;
+  effectiveDate?: DateStr;
+  notes?: string;
+}
+
+// POST /api/v3/branches/:branch_id/timeoff_transaction_requests
+// Creates the leave transaction that carries the deduction. ZenHR returns
+// the created transaction, whose id we keep as the receipt.
+export async function createTimeoffTransactionRequest(
+  input: CreateTimeoffRequestInput
+): Promise<{ id?: number; status?: string; amount?: number }> {
+  return apiPostForm(`/api/v3/branches/${input.branchId}/timeoff_transaction_requests`, {
+    employee_id: String(input.employeeId),
+    timeoff_id: String(input.timeoffId),
+    from_date: input.fromDate,
+    to_date: input.toDate,
+    effective_date: input.effectiveDate ?? input.fromDate,
+    notes: input.notes ?? "",
+  });
+}

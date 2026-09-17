@@ -1,0 +1,32 @@
+{
+  "name": "fullstock-attendance-tool",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "prisma generate && next build",
+    "start": "prisma migrate deploy && npm run seed && next start -p ${PORT:-3000}",
+    "seed": "tsx scripts/seed.ts",
+    "test": "vitest run",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "date-fns": "^3.6.0",
+    "iron-session": "^8.0.3",
+    "next": "15.5.22",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.1",
+    "prisma": "^5.20.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
+  }
+}
