@@ -86,15 +86,91 @@ export async function exchangeCodeForToken(code: string) {
 
 const EXPIRY_BUFFER_MS = 60_000;
 
+// How this tool authenticates to ZenHR, in the order it tries them. Set
+// whichever your ZenHR account supports; no browser step is involved in any
+// of them except OAUTH_REDIRECT.
+//
+//   API_KEY         ZENHR_API_KEY + ZENHR_API_SECRET, exchanged for a token
+//                   through the client_credentials grant. This is the
+//                   Integration Setup > API Keys route, where Read / Write /
+//                   Update are ticked per key.
+//   STATIC_TOKEN    ZENHR_ACCESS_TOKEN sent as-is. Simplest, but the token
+//                   expires unless ZENHR_REFRESH_TOKEN is set too.
+//   REFRESH_TOKEN   ZENHR_REFRESH_TOKEN from ZenHR's "Manage Tokens" screen,
+//                   exchanged for access tokens indefinitely. Their docs call
+//                   this renewing a token without Global Admin credentials.
+//   OAUTH_REDIRECT  The one-time browser authorisation at
+//                   /admin/connect-zenhr, refreshing itself afterwards.
+//
+// Note on permissions: what a credential may write is decided by its scopes
+// (or the Read/Write/Update ticks on an API key), not by which of these was
+// used to obtain it.
+export type AuthMode = "API_KEY" | "STATIC_TOKEN" | "REFRESH_TOKEN" | "OAUTH_REDIRECT" | "NONE";
+
+export function authMode(): AuthMode {
+  if (env("ZENHR_API_KEY") && env("ZENHR_API_SECRET")) return "API_KEY";
+  if (env("ZENHR_ACCESS_TOKEN")) return "STATIC_TOKEN";
+  if (env("ZENHR_REFRESH_TOKEN")) return "REFRESH_TOKEN";
+  return "OAUTH_REDIRECT";
+}
+
+// The header carrying the credential. ZenHR's published API takes
+// "Authorization: Bearer <token>"; these two are configurable only so an
+// account whose API keys work differently can be pointed at the right shape
+// without a code change.
+function authHeaders(token: string): Record<string, string> {
+  const header = env("ZENHR_AUTH_HEADER") || "Authorization";
+  const scheme = process.env.ZENHR_AUTH_SCHEME ?? "Bearer";
+  return { [header]: scheme ? `${scheme} ${token}` : token };
+}
+
+// Tokens obtained from a key or refresh token are cached in the same row the
+// OAuth flow uses, so a serverless invocation does not re-exchange on every
+// request.
+async function cachedToken(): Promise<{ accessToken: string; expiresAt: Date } | null> {
+  const stored = await prisma.zenhrOAuthToken.findUnique({ where: { id: "default" } });
+  if (!stored) return null;
+  return stored.expiresAt.getTime() - EXPIRY_BUFFER_MS > Date.now() ? stored : null;
+}
+
 async function accessToken(): Promise<string> {
+  const mode = authMode();
+
+  // A statically supplied token is used exactly as given.
+  if (mode === "STATIC_TOKEN") return env("ZENHR_ACCESS_TOKEN");
+
+  const cached = await cachedToken();
+  if (cached) return cached.accessToken;
+
+  if (mode === "API_KEY") {
+    const token = await requestToken({
+      grant_type: "client_credentials",
+      client_id: env("ZENHR_API_KEY"),
+      client_secret: env("ZENHR_API_SECRET"),
+      ...(SCOPES ? { scope: SCOPES } : {}),
+    });
+    await saveToken(token);
+    return token.access_token;
+  }
+
+  if (mode === "REFRESH_TOKEN") {
+    const token = await requestToken({
+      grant_type: "refresh_token",
+      refresh_token: env("ZENHR_REFRESH_TOKEN"),
+      client_id: env("ZENHR_CLIENT_ID"),
+      client_secret: env("ZENHR_CLIENT_SECRET"),
+    });
+    await saveToken(token);
+    return token.access_token;
+  }
+
   const stored = await prisma.zenhrOAuthToken.findUnique({ where: { id: "default" } });
   if (!stored) {
     throw new Error(
-      "ZenHR is not connected yet - open /admin/connect-zenhr once to authorise the integration."
+      "ZenHR is not connected. Set ZENHR_API_KEY and ZENHR_API_SECRET (Integration Setup > " +
+        "API Keys), or ZENHR_REFRESH_TOKEN (Manage Tokens), or authorise once at /admin/connect-zenhr."
     );
   }
-  if (stored.expiresAt.getTime() - EXPIRY_BUFFER_MS > Date.now()) return stored.accessToken;
-
   const refreshed = await requestToken({
     grant_type: "refresh_token",
     refresh_token: stored.refreshToken,
@@ -105,8 +181,49 @@ async function accessToken(): Promise<string> {
   return refreshed.access_token;
 }
 
-export function isConnected(): Promise<boolean> {
-  return prisma.zenhrOAuthToken.findUnique({ where: { id: "default" } }).then(Boolean);
+export async function isConnected(): Promise<boolean> {
+  if (authMode() !== "OAUTH_REDIRECT") return true;
+  return Boolean(await prisma.zenhrOAuthToken.findUnique({ where: { id: "default" } }));
+}
+
+// Calls ZenHR's who_am_i and reports what the credential actually is and what
+// it is allowed to do. This is how we establish, from evidence rather than
+// documentation, whether a given key carries write access.
+export interface ConnectionTest {
+  ok: boolean;
+  mode: AuthMode;
+  message: string;
+  scopes?: string[];
+  company?: string | number;
+  canWriteTimeoff?: boolean;
+}
+
+export async function testConnection(): Promise<ConnectionTest> {
+  const mode = authMode();
+  try {
+    const who = await apiGet<{
+      token_info?: {
+        scopes?: string[];
+        props?: { company_id?: number; name?: string; branch_id?: number };
+      };
+    }>("/api/v3/who_am_i");
+
+    const scopes = who.token_info?.scopes ?? [];
+    // ZenHR has used both "write:timeoff" and "write.timeoff" spellings.
+    const canWriteTimeoff = scopes.some((s) => /write[.:]timeoff/i.test(s));
+    return {
+      ok: true,
+      mode,
+      message: scopes.length
+        ? `Connected. ZenHR reports these permissions: ${scopes.join(", ")}.`
+        : "Connected, though ZenHR returned no scope list for this credential.",
+      scopes,
+      company: who.token_info?.props?.company_id,
+      canWriteTimeoff,
+    };
+  } catch (err) {
+    return { ok: false, mode, message: (err as Error).message };
+  }
 }
 
 type Query = Record<string, string | number | undefined | (string | number)[]>;
@@ -123,7 +240,7 @@ function buildUrl(path: string, query: Query): string {
 
 async function apiGet<T>(path: string, query: Query = {}): Promise<T> {
   const res = await fetch(buildUrl(path, query), {
-    headers: { Authorization: `Bearer ${await accessToken()}` },
+    headers: authHeaders(await accessToken()),
     cache: "no-store",
   });
   if (!res.ok) {
@@ -142,7 +259,7 @@ async function apiPostForm<T>(path: string, fields: Record<string, string>): Pro
 
   const res = await fetch(`${apiOrigin()}${path}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${await accessToken()}` },
+    headers: authHeaders(await accessToken()),
     body: form,
   });
   const text = await res.text().catch(() => "");

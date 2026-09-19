@@ -29,8 +29,9 @@ missing; use the npm scripts.
 First boot, in order:
 
 1. Sign in with `APP_PASSWORD`.
-2. **ZenHR connection** → authorise the integration once (OAuth; the tool refreshes its own token
-   after that).
+2. **ZenHR connection** → set one of the credentials below, then press **Test connection** on that
+   page. It asks ZenHR's `who_am_i` what the credential may actually do and says plainly whether
+   deductions will apply.
 3. **Settings** → map each bucket (Emergency / Annual / Unpaid / Business Mission) onto the real
    ZenHR leave type, and set the yearly entitlements.
 4. **Review** → pick a range and pull.
@@ -84,6 +85,25 @@ nothing.
 Every applied day is stored in `AppliedDeduction`, unique on (employee, date). That row is what
 stops a replayed or double-clicked Apply from charging the same day twice, and applied days drop out
 of the next pull's queue.
+
+## Authenticating to ZenHR
+
+Four ways, tried in this order. The first three involve no browser step:
+
+| Set this | What happens |
+|---|---|
+| `ZENHR_API_KEY` + `ZENHR_API_SECRET` | Integration Setup → API Keys. Exchanged through the `client_credentials` grant; write access is the Read/Write/Update tick on the key |
+| `ZENHR_REFRESH_TOKEN` | From ZenHR's **Manage Tokens** screen; the tool renews access tokens from it indefinitely |
+| `ZENHR_ACCESS_TOKEN` | Sent as-is. Simplest, but expires |
+| `ZENHR_CLIENT_ID` + `ZENHR_CLIENT_SECRET` | One-time browser authorisation at `/admin/connect-zenhr`, refreshing itself afterwards |
+
+Worth being precise about a common misreading: the browser redirect does not mean read-only, and an
+API key does not by itself mean write. **Permissions come from the scopes or the per-key ticks**, not
+from how the credential was obtained. The redirect, where used, happens once rather than per run.
+`/api/zenhr/test` is the arbiter — it reports the permissions ZenHR itself returns.
+
+Tokens obtained from a key or refresh token are cached in the same row the OAuth flow uses, so a
+serverless invocation does not re-exchange on every request.
 
 ## ZenHR endpoints this uses
 
