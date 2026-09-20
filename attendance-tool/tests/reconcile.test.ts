@@ -59,8 +59,31 @@ describe("time off settles a day", () => {
     expect(day.suggestedReason).toBeNull();
   });
 
+  it("treats an unfamiliar status as covering rather than charging the person", () => {
+    // The dangerous direction: a status we have never seen must not read as
+    // "no leave booked", because that silently deducts a day.
+    for (const status of ["Approved by manager", "taken_paid", "3", "in_progress", ""]) {
+      const rows = run({
+        timeoff: [
+          {
+            employmentNumber: "124",
+            from: "2026-09-08",
+            to: "2026-09-08",
+            timeoffId: 809,
+            timeoffName: "Annual Vacation",
+            status,
+            notes: "",
+          },
+        ],
+      });
+      const day = rows.find((r) => r.date === "2026-09-08")!;
+      expect(day.state).toBe("TIME_OFF");
+      expect(day.detail).toContain("status:");
+    }
+  });
+
   it("ignores a cancelled or withdrawn transaction", () => {
-    for (const status of ["cancelled", "withdrawn", "pending"]) {
+    for (const status of ["cancelled", "withdrawn", "rejected", "CANCELLED", " declined "]) {
       const rows = run({
         timeoff: [
           {

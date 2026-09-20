@@ -41,8 +41,26 @@ export interface BucketBalances {
   remaining: { emergency: number | null; annual: number | null } | null;
 }
 
-// The transaction statuses that mean a day is genuinely covered.
-const COVERING_STATUSES = new Set(["approved", "accepted", "taken", "active"]);
+// Shared with the engine: a deny-list, so an unfamiliar status never
+// silently turns booked leave into an absence.
+import { statusCoversDay } from "./reconcile";
+
+// ZenHR returns dates either with an explicit offset ("2026-09-08T00:00:00+03:00",
+// where the written date is the local one) or in UTC ("2026-09-08T21:00:00Z",
+// which is already the next day in Cairo). Slicing the string handles the
+// first and gets the second wrong by a day, so UTC timestamps are converted
+// to the branch's timezone first.
+const BRANCH_TIMEZONE = process.env.ZENHR_TIMEZONE || "Africa/Cairo";
+
+export function zenhrDate(iso: string): DateStr {
+  if (!iso) return iso;
+  const hasExplicitOffset = /[+-]\d{2}:?\d{2}$/.test(iso);
+  if (hasExplicitOffset) return iso.slice(0, 10);
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso.slice(0, 10);
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: BRANCH_TIMEZONE }).format(parsed);
+}
 
 function normaliseName(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
@@ -215,7 +233,7 @@ async function readBalances(
 
   const usedByEmployeeAndType = new Map<string, number>();
   for (const t of transactions) {
-    if (!COVERING_STATUSES.has(t.status.toLowerCase())) continue;
+    if (!statusCoversDay(t.status)) continue;
     const k = `${t.employee.id}|${t.timeoff.id}`;
     usedByEmployeeAndType.set(k, (usedByEmployeeAndType.get(k) ?? 0) + (t.amount ?? 0));
   }
@@ -289,18 +307,46 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
   );
   const timeoffTransactions = await zenhr.listTimeoffTransactions(branchId, from, to);
   const timeoff: EngineTimeoff[] = [];
+  // Whatever ZenHR returned, reported back plainly. Leave silently missing is
+  // the failure that charges someone for a day they booked, so the pull says
+  // how many transactions arrived, which statuses they carried, and how many
+  // could not be matched to a roster row.
+  const statusCounts = new Map<string, number>();
+  let unmatchedTransactions = 0;
   for (const t of timeoffTransactions) {
+    const label = `${t.status || "unspecified"}${statusCoversDay(t.status) ? "" : " (ignored)"}`;
+    statusCounts.set(label, (statusCounts.get(label) ?? 0) + 1);
     const employmentNumber = byZenhrId.get(t.employee.id)?.employmentNumber;
-    if (!employmentNumber) continue;
+    if (!employmentNumber) {
+      unmatchedTransactions += 1;
+      continue;
+    }
     timeoff.push({
       employmentNumber,
-      from: t.from_date.slice(0, 10),
-      to: t.to_date.slice(0, 10),
+      from: zenhrDate(t.from_date),
+      to: zenhrDate(t.to_date),
       timeoffId: t.timeoff.id,
       timeoffName: timeoffNameById.get(t.timeoff.id) ?? `Time off #${t.timeoff.id}`,
       status: t.status,
       notes: t.notes ?? "",
     });
+  }
+
+  if (timeoffTransactions.length === 0) {
+    warnings.push(
+      `ZenHR returned no time-off transactions at all for ${from} to ${to}. If people did book ` +
+        `leave in that range, the reads are not seeing it - check the app's Data Access Level is ` +
+        `Company rather than User.`
+    );
+  } else {
+    warnings.push(
+      `Time off: ${timeoffTransactions.length} transactions from ZenHR (${[...statusCounts]
+        .map(([status, count]) => `${count} ${status}`)
+        .join(", ")}).` +
+        (unmatchedTransactions
+          ? ` ${unmatchedTransactions} belong to employees not on the roster and were skipped.`
+          : "")
+    );
   }
 
   // --- Bricks visits (reference signal; never blocks a pass) ---

@@ -119,9 +119,31 @@ export interface ReconcileInput {
   today?: DateStr;
 }
 
-// ZenHR marks a transaction's lifecycle in `status`. Only these actually
-// cover a day; a cancelled or withdrawn request does not.
-const COVERING_TIMEOFF_STATUSES = new Set(["approved", "accepted", "taken", "active"]);
+// Statuses that mean a transaction does NOT cover the day.
+//
+// Deliberately a deny-list. An allow-list gets this dangerously wrong: any
+// status ZenHR uses that we have not seen - a different spelling, a numeric
+// code, a workflow state added later - would silently read as "no leave on
+// file" and the person would be charged for a day they had properly booked.
+// Not charging someone by mistake is recoverable; charging them is not. So
+// anything unrecognised counts as covering, and the row names the status so
+// a reviewer can see what it was.
+const NON_COVERING_TIMEOFF_STATUSES = new Set([
+  "cancelled",
+  "canceled",
+  "withdrawn",
+  "rejected",
+  "declined",
+  "refused",
+  "deleted",
+  "draft",
+  "expired",
+  "reverted",
+]);
+
+export function statusCoversDay(status: string): boolean {
+  return !NON_COVERING_TIMEOFF_STATUSES.has(status.trim().toLowerCase());
+}
 
 export function coversDay(t: EngineTimeoff, date: DateStr): boolean {
   return t.from <= date && date <= t.to;
@@ -232,7 +254,7 @@ export function reconcile(input: ReconcileInput): ResolvedRow[] {
       // An approved time-off transaction covering the day settles it,
       // whether or not anybody clocked in.
       const covering = (timeoffByEmployee.get(emp.employmentNumber) ?? []).find(
-        (t) => coversDay(t, date) && COVERING_TIMEOFF_STATUSES.has(t.status.toLowerCase())
+        (t) => coversDay(t, date) && statusCoversDay(t.status)
       );
       if (covering) {
         // A business mission is working time, not leave. It resolves as
@@ -247,7 +269,9 @@ export function reconcile(input: ReconcileInput): ResolvedRow[] {
             ? `Working: ${covering.timeoffName} filed in ZenHR${
                 base.workedHours !== null ? `, ${base.workedHours}h also clocked` : ""
               }`
-            : `Covered by an approved ${covering.timeoffName} transaction in ZenHR`,
+            : `Covered by a ${covering.timeoffName} transaction in ZenHR (status: ${
+                covering.status || "unspecified"
+              })`,
         });
         continue;
       }
