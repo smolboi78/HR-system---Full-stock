@@ -663,6 +663,34 @@ export function listTimeoffs(branchId: number): Promise<ZenhrTimeoff[]> {
   return fetchAllPages<ZenhrTimeoff>(`/api/v3/branches/${branchId}/timeoffs`);
 }
 
+// Everything ZenHR holds for one employee, with no date filter, capped.
+// If a filtered read returns nothing and this returns records, the filter is
+// the fault; if both are empty, the leave is not a timeoff transaction.
+export function listEmployeeTimeoffTransactionsUnfiltered(
+  branchId: number,
+  employeeId: number
+): Promise<ZenhrTimeoffTransaction[]> {
+  return fetchAllPages<ZenhrTimeoffTransaction>(
+    `/api/v3/branches/${branchId}/employees/${employeeId}/timeoff_transactions`,
+    {},
+    { maxPages: 3, pageDelayMs: 150 }
+  );
+}
+
+// Absences are not always time off. ZenHR also records miscellaneous
+// requests (permissions and excuses) and business trips, either of which
+// could be how a half day was entered.
+export function listEmployeeMiscellaneousRequests(
+  branchId: number,
+  employeeId: number
+): Promise<unknown[]> {
+  return fetchAllPages<unknown>(
+    `/api/v3/branches/${branchId}/employees/${employeeId}/miscellaneous_requests`,
+    {},
+    { maxPages: 2, pageDelayMs: 150 }
+  );
+}
+
 export function listEmployeeTimeoffTransactions(
   branchId: number,
   employeeId: number,

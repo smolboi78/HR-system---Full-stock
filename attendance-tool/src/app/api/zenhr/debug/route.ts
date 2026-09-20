@@ -27,28 +27,50 @@ async function forOneEmployee(employmentNumber: string, from: string, to: string
   }
 
   const branchId = await resolveBranchId();
-  try {
-    const own = await zenhr.listEmployeeTimeoffTransactions(
-      branchId,
-      employee.zenhrEmployeeId,
-      from,
-      to
-    );
-    return {
-      employmentNumber,
-      name: employee.nameEn,
-      zenhrEmployeeId: employee.zenhrEmployeeId,
-      endpoint: `/branches/${branchId}/employees/${employee.zenhrEmployeeId}/timeoff_transactions`,
-      count: own.length,
-      records: summarise(own, 50),
-    };
-  } catch (err) {
-    return {
-      employmentNumber,
-      zenhrEmployeeId: employee.zenhrEmployeeId,
-      error: (err as Error).message,
-    };
-  }
+  const id = employee.zenhrEmployeeId;
+
+  // Asked three ways, because a filtered read returning nothing has two very
+  // different meanings: our filter excluded it, or ZenHR holds no such
+  // record - in which case the absence was entered as something other than a
+  // time-off transaction.
+  const [filtered, unfiltered, misc] = await Promise.allSettled([
+    zenhr.listEmployeeTimeoffTransactions(branchId, id, from, to),
+    zenhr.listEmployeeTimeoffTransactionsUnfiltered(branchId, id),
+    zenhr.listEmployeeMiscellaneousRequests(branchId, id),
+  ]);
+
+  const unfilteredList = unfiltered.status === "fulfilled" ? unfiltered.value : [];
+  const overlapping = unfilteredList.filter(
+    (t) => zenhrDate(t.from_date) <= to && zenhrDate(t.to_date) >= from
+  );
+
+  return {
+    employmentNumber,
+    name: employee.nameEn,
+    zenhrEmployeeId: id,
+    endpoint: `/branches/${branchId}/employees/${id}/timeoff_transactions`,
+    withOurDateFilter:
+      filtered.status === "fulfilled"
+        ? { count: filtered.value.length, records: summarise(filtered.value, 20) }
+        : { error: String(filtered.reason) },
+    withNoDateFilter:
+      unfiltered.status === "fulfilled"
+        ? {
+            count: unfilteredList.length,
+            overlappingTheRange: overlapping.length,
+            // Recent records regardless of range, to see what this employee's
+            // leave actually looks like when ZenHR does return some.
+            mostRecent: summarise(
+              [...unfilteredList].sort((a, b) => b.from_date.localeCompare(a.from_date)),
+              15
+            ),
+          }
+        : { error: String(unfiltered.reason) },
+    miscellaneousRequests:
+      misc.status === "fulfilled"
+        ? { count: misc.value.length, sample: misc.value.slice(0, 15) }
+        : { error: String(misc.reason) },
+  };
 }
 
 function summarise(list: zenhr.ZenhrTimeoffTransaction[], limit = 25) {
