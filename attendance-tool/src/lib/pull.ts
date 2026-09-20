@@ -398,7 +398,54 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
     );
   }
 
+  // Leave is read per employee, not branch-wide.
+  //
+  // Against the real account the branch-wide list returned only leave HR had
+  // added directly - four records for a fortnight across 31 people, every one
+  // of them AddedByHR - while leave employees had requested and managers
+  // approved was absent entirely. The per-employee endpoint returns both
+  // kinds, so it is the source of truth here, and the branch-wide results are
+  // merged in on top rather than relied upon.
+  //
+  // That is 31 small reads. They run in batches to stay inside ZenHR's rate
+  // limit of roughly 15 requests per 4 seconds.
+  const matchedRoster = roster.filter((r) => r.zenhrEmployeeId && !r.excluded);
+  const perEmployee: zenhr.ZenhrTimeoffTransaction[] = [];
+  const perEmployeeFailures: string[] = [];
+  const BATCH = 6;
+  for (let i = 0; i < matchedRoster.length; i += BATCH) {
+    const batch = matchedRoster.slice(i, i + BATCH);
+    const settled = await Promise.allSettled(
+      batch.map((r) =>
+        zenhr.listEmployeeTimeoffTransactions(
+          branchId,
+          r.zenhrEmployeeId as number,
+          from,
+          to
+        )
+      )
+    );
+    settled.forEach((result, index) => {
+      if (result.status === "fulfilled") perEmployee.push(...result.value);
+      else perEmployeeFailures.push(batch[index].employmentNumber);
+    });
+    if (i + BATCH < matchedRoster.length) await new Promise((r) => setTimeout(r, 250));
+  }
+  if (perEmployeeFailures.length) {
+    warnings.push(
+      `Could not read time off for ${perEmployeeFailures.length} employee(s): ` +
+        `${perEmployeeFailures.join(", ")}. Treat any absence flagged for them with suspicion.`
+    );
+  }
+
   const byTransactionId = new Map<number, zenhr.ZenhrTimeoffTransaction>();
+  let fromPerEmployee = 0;
+  for (const t of perEmployee) {
+    // Only what actually overlaps the window.
+    if (zenhrDate(t.from_date) > to || zenhrDate(t.to_date) < from) continue;
+    if (!byTransactionId.has(t.id)) fromPerEmployee += 1;
+    byTransactionId.set(t.id, t);
+  }
   for (const t of transactionsResult.status === "fulfilled" ? transactionsResult.value : []) {
     byTransactionId.set(t.id, t);
   }
@@ -450,7 +497,9 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
   } else {
     warnings.push(
       `Time off: ${timeoffTransactions.length} records from ZenHR` +
-        (fromRequests ? ` (${fromRequests} of them employee requests)` : "") +
+        ` (${fromPerEmployee} read per employee` +
+        (fromRequests ? `, ${fromRequests} more from the requests list` : "") +
+        `)` +
         ` - ${[...statusCounts].map(([status, count]) => `${count} ${status}`).join(", ")}.` +
         (unmatchedTransactions
           ? ` ${unmatchedTransactions} belong to employees not on the roster and were skipped.`
