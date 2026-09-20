@@ -447,14 +447,19 @@ interface ListResponse<T> {
   data: T[];
 }
 
-async function fetchAllPages<T>(path: string, query: Query = {}, pageDelayMs = 300): Promise<T[]> {
+async function fetchAllPages<T>(
+  path: string,
+  query: Query = {},
+  options: { pageDelayMs?: number; maxPages?: number } = {}
+): Promise<T[]> {
+  const { pageDelayMs = 300, maxPages = Infinity } = options;
   const all: T[] = [];
   let page = 1;
   while (true) {
     const resp = await apiGet<ListResponse<T>>(path, { ...query, page, limit: 200 });
     all.push(...(resp.data ?? []));
     const totalPages = resp.pagination?.total_pages ?? 1;
-    if (page >= totalPages) break;
+    if (page >= totalPages || page >= maxPages) break;
     page += 1;
     await sleep(pageDelayMs);
   }
@@ -629,15 +634,24 @@ export function listTimeoffTransactionRequests(
   );
 }
 
-// Everything the endpoint has, with no date filter at all. Used only by the
-// diagnostic, to tell "ZenHR has no such data" apart from "our filter
-// excluded it" - which no amount of reasoning can settle from the outside.
-export function listTimeoffTransactionsUnfiltered(
-  branchId: number
+// The same read over a much wider window, capped at a few pages. Used by the
+// diagnostic to tell "ZenHR has no such data" apart from "our filter
+// excluded it", without paging through years of history - which is itself
+// enough to exhaust a serverless function and return nothing at all.
+export function listTimeoffTransactionsWide(
+  branchId: number,
+  from: DateStr,
+  to: DateStr
 ): Promise<ZenhrTimeoffTransaction[]> {
+  const widen = (date: DateStr, days: number) => {
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
   return fetchAllPages<ZenhrTimeoffTransaction>(
     `/api/v3/branches/${branchId}/timeoff_transactions`,
-    {}
+    { "filter[from_date][from]": widen(from, -90), "filter[from_date][to]": widen(to, 90) },
+    { maxPages: 3 }
   );
 }
 

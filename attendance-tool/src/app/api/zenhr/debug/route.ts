@@ -48,11 +48,22 @@ export async function GET(request: Request) {
       orderBy: { employmentNumber: "asc" },
     });
 
+    // Every probe is bounded, so the diagnostic always answers even when one
+    // of them is slow - an endpoint that returns nothing is exactly the
+    // failure it exists to explain.
+    const withTimeout = <T>(p: Promise<T>, label: string): Promise<T | Error> =>
+      Promise.race([
+        p.catch((e) => e as Error),
+        new Promise<Error>((resolve) =>
+          setTimeout(() => resolve(new Error(`${label} did not answer within 15s`)), 15_000)
+        ),
+      ]);
+
     const [filtered, requests, unfiltered, employees] = await Promise.all([
-      zenhr.listTimeoffTransactions(branchId, from, to).catch((e) => e as Error),
-      zenhr.listTimeoffTransactionRequests(branchId, from, to).catch((e) => e as Error),
-      zenhr.listTimeoffTransactionsUnfiltered(branchId).catch((e) => e as Error),
-      zenhr.listEmployees(branchId).catch((e) => e as Error),
+      withTimeout(zenhr.listTimeoffTransactions(branchId, from, to), "transactions"),
+      withTimeout(zenhr.listTimeoffTransactionRequests(branchId, from, to), "requests"),
+      withTimeout(zenhr.listTimeoffTransactionsWide(branchId, from, to), "wide window"),
+      withTimeout(zenhr.listEmployees(branchId), "employees"),
     ]);
 
     const asList = (v: zenhr.ZenhrTimeoffTransaction[] | Error) =>
@@ -80,7 +91,7 @@ export async function GET(request: Request) {
       },
       timeoffTransactionsFiltered: asList(filtered),
       timeoffTransactionRequestsFiltered: asList(requests),
-      timeoffTransactionsUnfiltered:
+      timeoffTransactionsWideWindow:
         unfiltered instanceof Error
           ? { error: unfiltered.message }
           : {
