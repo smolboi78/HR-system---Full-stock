@@ -56,6 +56,7 @@ export interface ReconcileResponse {
   warnings: string[];
   balances: Record<string, Balances>;
   reasons: Reason[];
+  applyEnabled?: boolean;
   error?: string;
 }
 

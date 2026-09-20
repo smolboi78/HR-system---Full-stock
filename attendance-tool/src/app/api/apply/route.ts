@@ -23,6 +23,16 @@ export const maxDuration = 60;
 export async function POST(request: Request) {
   try {
     const user = await requireUser();
+    if (process.env.APPLY_ENABLED !== "true") {
+      return NextResponse.json(
+        {
+          error:
+            "Applying is switched off. The tool is reading and reconciling only; " +
+            "add the time off in ZenHR directly. Set APPLY_ENABLED=true to turn it back on.",
+        },
+        { status: 409 }
+      );
+    }
     const parsed = Body.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json(

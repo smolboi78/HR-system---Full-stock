@@ -48,7 +48,12 @@ export async function GET(request: Request) {
       }),
       prisma.reason.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
     ]);
-    return NextResponse.json({ ...result, reasons });
+    // Applying is off by default while the reconciliation itself is being
+    // proven against real data. The tool's job right now is to say which
+    // days have no attendance, no visit and no time off, so they can be
+    // entered in ZenHR by hand.
+    const applyEnabled = process.env.APPLY_ENABLED === "true";
+    return NextResponse.json({ ...result, reasons, applyEnabled });
   } catch (err) {
     // Surface which step failed rather than a blank 500 - the usual causes
     // are an unconnected ZenHR app or a missing API key.

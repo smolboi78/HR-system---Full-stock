@@ -35,6 +35,7 @@ export function ReviewWorkspace({
   const [showResolved, setShowResolved] = useState(false);
   const [showUnmatched, setShowUnmatched] = useState(false);
 
+  const applyEnabled = data?.applyEnabled === true;
   const reasonsByCode = useMemo(
     () => new Map((data?.reasons ?? []).map((r) => [r.code, r])),
     [data]
@@ -170,6 +171,12 @@ export function ReviewWorkspace({
   return (
     <>
       <section className="card">
+        {data && !applyEnabled && (
+          <div className="notice calm" style={{ marginBottom: 18 }}>
+            Reading only. These are the days with no attendance in ZenHR, no Bricks visit and no
+            time off on file — add the time off in ZenHR, then pull again to confirm it clears.
+          </div>
+        )}
         <div className="row">
           <div>
             <label htmlFor="from">From</label>
@@ -273,7 +280,7 @@ export function ReviewWorkspace({
       {data && (
         <div className="queue">
           <div>
-            {checkedRows.length > 1 && (
+            {applyEnabled && checkedRows.length > 1 && (
               <div className="card" style={{ padding: "16px 18px" }}>
                 <div className="tiny muted" style={{ marginBottom: 10 }}>
                   {checkedRows.length} rows selected. Batch apply sends every selected row with the
@@ -365,6 +372,7 @@ export function ReviewWorkspace({
                 onDraftChange={(patch) => setDraft(rowKey(selected), patch)}
                 onApply={() => apply([selected])}
                 applying={applying}
+                applyEnabled={applyEnabled}
               />
             ) : (
               <div className="card">

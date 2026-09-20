@@ -14,6 +14,7 @@ export function DetailPane({
   onDraftChange,
   onApply,
   applying,
+  applyEnabled = false,
 }: {
   row: Row;
   reasons: Reason[];
@@ -22,6 +23,7 @@ export function DetailPane({
   onDraftChange: (patch: Partial<Draft>) => void;
   onApply: () => void;
   applying: boolean;
+  applyEnabled?: boolean;
 }) {
   // Leave usage is read for this employee when their row is opened. Reading
   // it for everyone during a pull was the slowest thing the tool did, for a
@@ -238,12 +240,21 @@ export function DetailPane({
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 10, marginTop: 18, alignItems: "center" }}>
-        <button onClick={onApply} disabled={applying || !draft.reasonCode}>
-          {applying ? "Applying…" : "Apply & next"}
-        </button>
-        {!draft.reasonCode && <span className="tiny muted">A reason is needed before applying.</span>}
-      </div>
+      {applyEnabled ? (
+        <div style={{ display: "flex", gap: 10, marginTop: 18, alignItems: "center" }}>
+          <button onClick={onApply} disabled={applying || !draft.reasonCode}>
+            {applying ? "Applying…" : "Apply & next"}
+          </button>
+          {!draft.reasonCode && (
+            <span className="tiny muted">A reason is needed before applying.</span>
+          )}
+        </div>
+      ) : (
+        <p className="tiny muted" style={{ marginTop: 18 }}>
+          Nothing is written to ZenHR while the tool is reading only. Add the time off in ZenHR for
+          this day, then pull the range again — the row should disappear.
+        </p>
+      )}
     </section>
   );
 }
