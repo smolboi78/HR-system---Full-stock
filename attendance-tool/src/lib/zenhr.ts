@@ -28,6 +28,10 @@ export const REQUIRED_SCOPES = [
   "read:timeoff_transaction_request",
   "read:employee_shift",
   "read:work_shift",
+  // A "missing clocking" in ZenHR is a missing_punch, not time off - it is
+  // how a day someone did not clock properly gets explained.
+  "read:missing_punch",
+  "read:attendance_transaction",
   // Balances, so the review pane can show what is actually left rather than
   // only what has been taken.
   "timeoff_balances:employee",
@@ -657,6 +661,92 @@ export function listTimeoffTransactionsWide(
     { "filter[from_date][from]": widen(from, -90), "filter[from_date][to]": widen(to, 90) },
     { maxPages: 3 }
   );
+}
+
+// Missing clockings ("missing punches").
+//
+// ZenHR offers read:missing_punch as a scope but documents no endpoint for
+// it, so the path is discovered the same way the API key's header shape was:
+// try the conventional spellings once, keep the one that answers.
+export interface ZenhrMissingPunch {
+  id: number;
+  employee?: { id?: number };
+  employee_id?: number;
+  date?: string;
+  attendance_date?: string;
+  punch_date?: string;
+  from_date?: string;
+  to_date?: string;
+  from_time?: string;
+  to_time?: string;
+  status?: string | number;
+  notes?: string;
+  [key: string]: unknown;
+}
+
+const MISSING_PUNCH_PATH_SETTING = "zenhr.missingPunchPath";
+
+function missingPunchCandidates(branchId: number, employeeId?: number): string[] {
+  const branchLevel = [
+    `/api/v3/branches/${branchId}/missing_punches`,
+    `/api/v3/branches/${branchId}/attendance_transactions`,
+  ];
+  if (!employeeId) return branchLevel;
+  return [
+    `/api/v3/branches/${branchId}/employees/${employeeId}/missing_punches`,
+    ...branchLevel,
+  ];
+}
+
+export async function listMissingPunches(
+  branchId: number,
+  from: DateStr,
+  to: DateStr,
+  employeeId?: number
+): Promise<{ path: string | null; records: ZenhrMissingPunch[]; attempts: string[] }> {
+  const remembered = await prisma.setting.findUnique({
+    where: { key: MISSING_PUNCH_PATH_SETTING },
+  });
+  const candidates = missingPunchCandidates(branchId, employeeId);
+  const ordered = remembered?.value
+    ? [remembered.value, ...candidates.filter((c) => c !== remembered.value)]
+    : candidates;
+
+  const attempts: string[] = [];
+  for (const path of ordered) {
+    try {
+      const records = await fetchAllPages<ZenhrMissingPunch>(
+        path,
+        {
+          "filter[date][from]": from,
+          "filter[date][to]": to,
+        },
+        { maxPages: 3, pageDelayMs: 150 }
+      );
+      if (!employeeId) {
+        await prisma.setting.upsert({
+          where: { key: MISSING_PUNCH_PATH_SETTING },
+          create: { key: MISSING_PUNCH_PATH_SETTING, value: path },
+          update: { value: path },
+        });
+      }
+      return { path, records, attempts };
+    } catch (err) {
+      attempts.push(`${path}: ${(err as Error).message.slice(0, 160)}`);
+    }
+  }
+  return { path: null, records: [], attempts };
+}
+
+// A missing punch carries its date under one of several plausible names.
+export function missingPunchDates(record: ZenhrMissingPunch): string[] {
+  const candidates = [
+    record.date,
+    record.attendance_date,
+    record.punch_date,
+    record.from_date,
+  ].filter((v): v is string => typeof v === "string" && v.length >= 10);
+  return [...new Set(candidates.map((v) => v.slice(0, 10)))];
 }
 
 export function listTimeoffs(branchId: number): Promise<ZenhrTimeoff[]> {

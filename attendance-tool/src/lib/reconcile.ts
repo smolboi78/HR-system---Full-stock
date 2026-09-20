@@ -57,6 +57,15 @@ export interface EngineTimeoff {
   partialDay?: boolean;
 }
 
+// A "missing clocking" recorded in ZenHR: the person was at work but the
+// clock did not capture it. It explains a day just as attendance does.
+export interface EngineMissingPunch {
+  employmentNumber: string;
+  date: DateStr;
+  status: string;
+  note: string;
+}
+
 export interface EngineVisits {
   employmentNumber: string;
   date: DateStr;
@@ -116,6 +125,7 @@ export interface ReconcileInput {
   attendance: EngineAttendance[];
   timeoff: EngineTimeoff[];
   visits: EngineVisits[];
+  missingPunches?: EngineMissingPunch[];
   // Days already pushed to ZenHR, keyed "employmentNumber|date" - these
   // drop out of the queue so a second pass cannot double-charge.
   alreadyApplied?: Set<string>;
@@ -180,6 +190,9 @@ export function reconcile(input: ReconcileInput): ResolvedRow[] {
   const today = input.today;
   const applied = input.alreadyApplied ?? new Set<string>();
   const attendanceByKey = indexBy(input.attendance, (a) => key(a.employmentNumber, a.date));
+  const missingPunchByKey = indexBy(input.missingPunches ?? [], (m) =>
+    key(m.employmentNumber, m.date)
+  );
   const visitsByKey = indexBy(input.visits, (v) => key(v.employmentNumber, v.date));
 
   const timeoffByEmployee = new Map<string, EngineTimeoff[]>();
@@ -226,6 +239,7 @@ export function reconcile(input: ReconcileInput): ResolvedRow[] {
       if (applied.has(key(emp.employmentNumber, date))) continue;
 
       const att = attendanceByKey.get(key(emp.employmentNumber, date));
+      const missingPunch = missingPunchByKey.get(key(emp.employmentNumber, date));
       const visits = visitsByKey.get(key(emp.employmentNumber, date))?.count ?? null;
       const flags: Flag[] = [];
 
@@ -381,6 +395,20 @@ export function reconcile(input: ReconcileInput): ResolvedRow[] {
             base.workedHours !== null
               ? `Present, ${base.workedHours}h clocked`
               : "Present in ZenHR",
+        });
+        continue;
+      }
+
+      // A missing clocking recorded in ZenHR explains the day: the person was
+      // at work and the clock did not capture it. It is not an absence and
+      // nothing is owed for it.
+      if (missingPunch) {
+        rows.push({
+          ...base,
+          state: "PRESENT",
+          detail: `Missing clocking recorded in ZenHR${
+            missingPunch.status ? ` (${missingPunch.status})` : ""
+          }${missingPunch.note ? ` - ${missingPunch.note}` : ""}`,
         });
         continue;
       }

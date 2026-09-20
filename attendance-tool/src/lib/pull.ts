@@ -12,6 +12,7 @@ import {
   type EngineAttendance,
   type EngineEmployee,
   type EngineTimeoff,
+  type EngineMissingPunch,
   type EngineVisits,
   type ResolvedRow,
 } from "./reconcile";
@@ -556,6 +557,49 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
     warnings.push("BRICKS_API_KEY is not set, so delivery-agent visit counts are missing.");
   }
 
+  // --- Missing clockings ---
+  // A day explained by a missing clocking is not an absence. ZenHR documents
+  // no endpoint for these, so the path is discovered and remembered.
+  const missingPunches: EngineMissingPunch[] = [];
+  try {
+    const result = await zenhr.listMissingPunches(branchId, from, to);
+    if (!result.path) {
+      warnings.push(
+        `Could not read missing clockings - none of the expected endpoints answered. ` +
+          `${result.attempts.join("; ")}`
+      );
+    } else {
+      let unmatched = 0;
+      for (const record of result.records) {
+        const zenhrId = record.employee?.id ?? record.employee_id;
+        const employmentNumber = zenhrId ? byZenhrId.get(zenhrId)?.employmentNumber : undefined;
+        if (!employmentNumber) {
+          unmatched += 1;
+          continue;
+        }
+        for (const date of zenhr.missingPunchDates(record)) {
+          if (date < from || date > to) continue;
+          missingPunches.push({
+            employmentNumber,
+            date,
+            status: String(record.status ?? ""),
+            note: typeof record.notes === "string" ? record.notes : "",
+          });
+        }
+      }
+      warnings.push(
+        `Missing clockings: ${missingPunches.length} day(s) explained, read from ${result.path}` +
+          (unmatched ? `; ${unmatched} belonged to people not on the roster` : "") +
+          "."
+      );
+    }
+  } catch (err) {
+    warnings.push(
+      `Could not read missing clockings: ${(err as Error).message}. Days explained that way will ` +
+        `show as absences.`
+    );
+  }
+
   // --- Shifts and balances ---
   const shifts =
     options.includeShifts === false
@@ -621,6 +665,7 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
     attendance,
     timeoff,
     visits,
+    missingPunches,
     alreadyApplied,
     businessMissionEmployee: BUSINESS_MISSION_EMPLOYEE,
     businessMissionTimeoffIds,

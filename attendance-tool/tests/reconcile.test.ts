@@ -329,6 +329,46 @@ describe("clocked days", () => {
   });
 });
 
+describe("a missing clocking explains the day", () => {
+  // ZenHR records these as missing_punches, not as time off. Reading only
+  // time off made such days look like unexplained absences.
+  it("counts a day with a missing clocking as present", () => {
+    const row = run({
+      missingPunches: [
+        {
+          employmentNumber: "124",
+          date: "2026-09-08",
+          status: "approved",
+          note: "forgot to clock out",
+        },
+      ],
+    }).find((r) => r.date === "2026-09-08")!;
+    expect(row.state).toBe("PRESENT");
+    expect(row.detail).toContain("Missing clocking");
+    expect(row.detail).toContain("forgot to clock out");
+  });
+
+  it("leaves other days of the same person alone", () => {
+    const rows = run({
+      missingPunches: [
+        { employmentNumber: "124", date: "2026-09-08", status: "approved", note: "" },
+      ],
+    });
+    expect(rows.find((r) => r.date === "2026-09-07")!.state).toBe("EXCEPTION");
+    expect(rows.find((r) => r.date === "2026-09-09")!.state).toBe("EXCEPTION");
+  });
+
+  it("does not let one person's missing clocking explain another's day", () => {
+    const row = run({
+      employees: [employee(), employee({ employmentNumber: "126", nameEn: "Alaa Mamdouh" })],
+      missingPunches: [
+        { employmentNumber: "124", date: "2026-09-08", status: "approved", note: "" },
+      ],
+    }).find((r) => r.date === "2026-09-08" && r.employmentNumber === "126")!;
+    expect(row.state).toBe("EXCEPTION");
+  });
+});
+
 describe("Bricks as a signal", () => {
   it("counts a Bricks visit as presence for a presence-only role with no ZenHR record", () => {
     const row = run({

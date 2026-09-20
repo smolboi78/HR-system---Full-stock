@@ -33,10 +33,11 @@ async function forOneEmployee(employmentNumber: string, from: string, to: string
   // different meanings: our filter excluded it, or ZenHR holds no such
   // record - in which case the absence was entered as something other than a
   // time-off transaction.
-  const [filtered, unfiltered, misc] = await Promise.allSettled([
+  const [filtered, unfiltered, misc, punches] = await Promise.allSettled([
     zenhr.listEmployeeTimeoffTransactions(branchId, id, from, to),
     zenhr.listEmployeeTimeoffTransactionsUnfiltered(branchId, id),
     zenhr.listEmployeeMiscellaneousRequests(branchId, id),
+    zenhr.listMissingPunches(branchId, from, to, id),
   ]);
 
   const unfilteredList = unfiltered.status === "fulfilled" ? unfiltered.value : [];
@@ -66,6 +67,15 @@ async function forOneEmployee(employmentNumber: string, from: string, to: string
             ),
           }
         : { error: String(unfiltered.reason) },
+    missingClockings:
+      punches.status === "fulfilled"
+        ? {
+            pathThatAnswered: punches.value.path,
+            attempts: punches.value.attempts,
+            count: punches.value.records.length,
+            sample: punches.value.records.slice(0, 15),
+          }
+        : { error: String(punches.reason) },
     miscellaneousRequests:
       misc.status === "fulfilled"
         ? { count: misc.value.length, sample: misc.value.slice(0, 15) }
