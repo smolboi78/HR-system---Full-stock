@@ -15,6 +15,42 @@ export const maxDuration = 60;
 
 const DateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
+// "This person definitely had leave that day" is the report that matters,
+// and the branch-wide lists cannot answer it on their own - ZenHR also
+// exposes the transactions for a single employee, which is the narrowest
+// and most trustworthy question we can ask about one case.
+async function forOneEmployee(employmentNumber: string, from: string, to: string) {
+  const employee = await prisma.rosterEmployee.findUnique({ where: { employmentNumber } });
+  if (!employee) return { error: `${employmentNumber} is not on the roster` };
+  if (!employee.zenhrEmployeeId) {
+    return { error: `${employmentNumber} (${employee.nameEn}) has no ZenHR id on the roster` };
+  }
+
+  const branchId = await resolveBranchId();
+  try {
+    const own = await zenhr.listEmployeeTimeoffTransactions(
+      branchId,
+      employee.zenhrEmployeeId,
+      from,
+      to
+    );
+    return {
+      employmentNumber,
+      name: employee.nameEn,
+      zenhrEmployeeId: employee.zenhrEmployeeId,
+      endpoint: `/branches/${branchId}/employees/${employee.zenhrEmployeeId}/timeoff_transactions`,
+      count: own.length,
+      records: summarise(own, 50),
+    };
+  } catch (err) {
+    return {
+      employmentNumber,
+      zenhrEmployeeId: employee.zenhrEmployeeId,
+      error: (err as Error).message,
+    };
+  }
+}
+
 function summarise(list: zenhr.ZenhrTimeoffTransaction[], limit = 25) {
   return list.slice(0, limit).map((t) => ({
     id: t.id,
@@ -39,6 +75,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Pass ?from=YYYY-MM-DD&to=YYYY-MM-DD" }, { status: 400 });
   }
   const { from, to } = parsed.data;
+  const employee = url.searchParams.get("employee");
 
   try {
     const branches = await zenhr.listBranches();
@@ -78,6 +115,8 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       range: { from, to },
+      // Present only when ?employee=<employment number> was asked for.
+      oneEmployee: employee ? await forOneEmployee(employee, from, to) : undefined,
       branchUsed: branchId,
       allBranches: branches.map((b) => ({
         id: b.id,
