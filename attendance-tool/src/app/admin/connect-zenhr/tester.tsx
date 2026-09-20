@@ -41,11 +41,18 @@ export function ConnectionTester() {
           <div style={{ marginTop: 6 }}>{result.message}</div>
           {result.ok && (
             <div style={{ marginTop: 10 }}>
-              {result.canWriteTimeoff ? (
+              {result.canWriteTimeoff === true && (
                 <span className="chip calm">Can write time off — deductions will apply</span>
-              ) : (
+              )}
+              {result.canWriteTimeoff === false && (
                 <span className="chip alert">
                   No time-off write permission — reads work, Apply will fail
+                </span>
+              )}
+              {result.canWriteTimeoff === undefined && (
+                <span className="chip warn">
+                  Reads confirmed. Write access is whatever was ticked on the key — the first Apply
+                  will confirm it
                 </span>
               )}
             </div>

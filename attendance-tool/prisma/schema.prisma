@@ -24,6 +24,16 @@ model ZenhrOAuthToken {
   updatedAt    DateTime @updatedAt
 }
 
+// Small key/value store for things the tool learns at runtime rather than
+// being told - currently which header shape ZenHR accepts for an API key,
+// which is not documented anywhere and so has to be discovered once and
+// remembered.
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 // ---------- Roster (standing, editable in-tool) ----------
 
 // How an employee's attendance is judged. HOURS = duration from ZenHR

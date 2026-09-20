@@ -114,14 +114,75 @@ export function authMode(): AuthMode {
   return "OAUTH_REDIRECT";
 }
 
-// The header carrying the credential. ZenHR's published API takes
-// "Authorization: Bearer <token>"; these two are configurable only so an
-// account whose API keys work differently can be pointed at the right shape
-// without a code change.
+// The header carrying an OAuth access token. ZenHR's published API takes
+// "Authorization: Bearer <token>"; both parts stay configurable so an
+// account that differs can be pointed at the right shape without a release.
 function authHeaders(token: string): Record<string, string> {
   const header = env("ZENHR_AUTH_HEADER") || "Authorization";
   const scheme = process.env.ZENHR_AUTH_SCHEME ?? "Bearer";
   return { [header]: scheme ? `${scheme} ${token}` : token };
+}
+
+// How an Integration Setup API key is presented.
+//
+// ZenHR's token endpoint rejects the client_credentials grant, so a key
+// issued there is not an OAuth client - it is sent on each request instead.
+// Which header shape it expects is documented nowhere, so the candidates
+// below are tried once against who_am_i and the one ZenHR accepts is
+// remembered in Setting. Basic leads because the screen issues a Key and a
+// Secret, which is exactly the pair HTTP Basic takes, and offers "Basic" as
+// an authentication type.
+interface KeyScheme {
+  name: string;
+  headers: (key: string, secret: string) => Record<string, string>;
+}
+
+export const API_KEY_SCHEMES: KeyScheme[] = [
+  {
+    name: "basic",
+    headers: (key, secret) => ({
+      Authorization: `Basic ${Buffer.from(`${key}:${secret}`).toString("base64")}`,
+    }),
+  },
+  { name: "bearer-key", headers: (key) => ({ Authorization: `Bearer ${key}` }) },
+  { name: "bearer-secret", headers: (_key, secret) => ({ Authorization: `Bearer ${secret}` }) },
+  {
+    name: "x-api-key-pair",
+    headers: (key, secret) => ({ "X-API-KEY": key, "X-API-SECRET": secret }),
+  },
+  { name: "x-api-key", headers: (key) => ({ "X-API-KEY": key }) },
+  {
+    name: "x-zenhr-api-key",
+    headers: (key, secret) => ({ "X-ZENHR-API-KEY": key, "X-ZENHR-API-SECRET": secret }),
+  },
+  { name: "api-key-header", headers: (key) => ({ "api-key": key }) },
+];
+
+const KEY_SCHEME_SETTING = "zenhr.apiKeyScheme";
+
+async function rememberedScheme(): Promise<KeyScheme | null> {
+  // An explicit override always wins, so a shape we have not thought of can
+  // still be configured without a release.
+  const forced = env("ZENHR_AUTH_HEADER");
+  if (forced) {
+    const scheme = process.env.ZENHR_AUTH_SCHEME ?? "";
+    return {
+      name: `configured:${forced}`,
+      headers: (key) => ({ [forced]: scheme ? `${scheme} ${key}` : key }),
+    };
+  }
+  const stored = await prisma.setting.findUnique({ where: { key: KEY_SCHEME_SETTING } });
+  return API_KEY_SCHEMES.find((s) => s.name === stored?.value) ?? null;
+}
+
+// The headers for one request, whichever credential is configured.
+async function requestHeaders(): Promise<Record<string, string>> {
+  if (authMode() !== "API_KEY") return authHeaders(await accessToken());
+
+  const key = env("ZENHR_API_KEY");
+  const secret = env("ZENHR_API_SECRET");
+  const scheme = (await rememberedScheme()) ?? API_KEY_SCHEMES[0];
+  return scheme.headers(key, secret);
 }
 
 // Tokens obtained from a key or refresh token are cached in the same row the
@@ -138,20 +199,11 @@ async function accessToken(): Promise<string> {
 
   // A statically supplied token is used exactly as given.
   if (mode === "STATIC_TOKEN") return env("ZENHR_ACCESS_TOKEN");
+  // An API key is not exchanged for a token; see requestHeaders().
+  if (mode === "API_KEY") return env("ZENHR_API_KEY");
 
   const cached = await cachedToken();
   if (cached) return cached.accessToken;
-
-  if (mode === "API_KEY") {
-    const token = await requestToken({
-      grant_type: "client_credentials",
-      client_id: env("ZENHR_API_KEY"),
-      client_secret: env("ZENHR_API_SECRET"),
-      ...(SCOPES ? { scope: SCOPES } : {}),
-    });
-    await saveToken(token);
-    return token.access_token;
-  }
 
   if (mode === "REFRESH_TOKEN") {
     const token = await requestToken({
@@ -200,30 +252,84 @@ export interface ConnectionTest {
 
 export async function testConnection(): Promise<ConnectionTest> {
   const mode = authMode();
-  try {
-    const who = await apiGet<{
-      token_info?: {
-        scopes?: string[];
-        props?: { company_id?: number; name?: string; branch_id?: number };
-      };
-    }>("/api/v3/who_am_i");
 
-    const scopes = who.token_info?.scopes ?? [];
-    // ZenHR has used both "write:timeoff" and "write.timeoff" spellings.
-    const canWriteTimeoff = scopes.some((s) => /write[.:]timeoff/i.test(s));
+  // For an API key, find the header shape ZenHR accepts and remember it.
+  if (mode === "API_KEY") {
+    const key = env("ZENHR_API_KEY");
+    const secret = env("ZENHR_API_SECRET");
+    const forced = await rememberedScheme();
+    const candidates = forced ? [forced] : API_KEY_SCHEMES;
+    const attempts: string[] = [];
+
+    for (const scheme of candidates) {
+      try {
+        const res = await fetch(`${apiOrigin()}/api/v3/who_am_i`, {
+          headers: scheme.headers(key, secret),
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          attempts.push(`${scheme.name}: ${res.status}`);
+          continue;
+        }
+        const who = (await res.json()) as WhoAmI;
+        await prisma.setting.upsert({
+          where: { key: KEY_SCHEME_SETTING },
+          create: { key: KEY_SCHEME_SETTING, value: scheme.name },
+          update: { value: scheme.name },
+        });
+        return describeWho(who, mode, ` ZenHR accepts this key as "${scheme.name}".`);
+      } catch (err) {
+        attempts.push(`${scheme.name}: ${(err as Error).message}`);
+      }
+    }
+
     return {
-      ok: true,
+      ok: false,
       mode,
-      message: scopes.length
-        ? `Connected. ZenHR reports these permissions: ${scopes.join(", ")}.`
-        : "Connected, though ZenHR returned no scope list for this credential.",
-      scopes,
-      company: who.token_info?.props?.company_id,
-      canWriteTimeoff,
+      message:
+        `ZenHR rejected the key in every shape tried - ${attempts.join("; ")}. ` +
+        `Ask ZenHR support how an Integration Setup API key should be sent, then set ` +
+        `ZENHR_AUTH_HEADER (and ZENHR_AUTH_SCHEME) to match. A refresh token from ` +
+        `Manage Tokens, set as ZENHR_REFRESH_TOKEN, is the other way in.`,
     };
+  }
+
+  try {
+    return describeWho(await apiGet<WhoAmI>("/api/v3/who_am_i"), mode, "");
   } catch (err) {
     return { ok: false, mode, message: (err as Error).message };
   }
+}
+
+interface WhoAmI {
+  token_info?: {
+    scopes?: string[];
+    props?: { company_id?: number; name?: string; branch_id?: number };
+  };
+}
+
+function describeWho(who: WhoAmI, mode: AuthMode, suffix: string): ConnectionTest {
+  const scopes = who.token_info?.scopes ?? [];
+  // ZenHR has used both "write:timeoff" and "write.timeoff" spellings.
+  // With no scope list at all we genuinely do not know: scopes are an OAuth
+  // token's notion, and an API key carries per-key Read/Write/Update ticks
+  // that who_am_i does not report. Saying "no write access" there would be a
+  // guess dressed as a finding, so it stays undefined and the page says so.
+  const canWriteTimeoff = scopes.length
+    ? scopes.some((s) => /write[.:]timeoff/i.test(s))
+    : undefined;
+  return {
+    ok: true,
+    mode,
+    message:
+      (scopes.length
+        ? `Connected. ZenHR reports these permissions: ${scopes.join(", ")}.`
+        : "Connected. ZenHR returned no scope list, which is expected for an API key - " +
+          "its permissions are the Read / Write / Update ticks on the key itself.") + suffix,
+    scopes,
+    company: who.token_info?.props?.company_id,
+    canWriteTimeoff,
+  };
 }
 
 type Query = Record<string, string | number | undefined | (string | number)[]>;
@@ -240,7 +346,7 @@ function buildUrl(path: string, query: Query): string {
 
 async function apiGet<T>(path: string, query: Query = {}): Promise<T> {
   const res = await fetch(buildUrl(path, query), {
-    headers: authHeaders(await accessToken()),
+    headers: await requestHeaders(),
     cache: "no-store",
   });
   if (!res.ok) {
@@ -259,7 +365,7 @@ async function apiPostForm<T>(path: string, fields: Record<string, string>): Pro
 
   const res = await fetch(`${apiOrigin()}${path}`, {
     method: "POST",
-    headers: authHeaders(await accessToken()),
+    headers: await requestHeaders(),
     body: form,
   });
   const text = await res.text().catch(() => "");

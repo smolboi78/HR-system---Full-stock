@@ -20,6 +20,15 @@ CREATE TABLE "ZenhrOAuthToken" (
 );
 
 -- CreateTable
+CREATE TABLE "Setting" (
+    "key" TEXT NOT NULL,
+    "value" TEXT NOT NULL,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Setting_pkey" PRIMARY KEY ("key")
+);
+
+-- CreateTable
 CREATE TABLE "RosterEmployee" (
     "employmentNumber" TEXT NOT NULL,
     "nameEn" TEXT NOT NULL,
