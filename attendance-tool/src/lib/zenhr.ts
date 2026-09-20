@@ -615,6 +615,32 @@ export function listTimeoffTransactions(
   );
 }
 
+// Approved leave can surface as a transaction, as a request, or both,
+// depending on how it was created. Reading only one of the two lists is a
+// plausible reason for leave appearing to be absent, so both are available.
+export function listTimeoffTransactionRequests(
+  branchId: number,
+  from: DateStr,
+  to: DateStr
+): Promise<ZenhrTimeoffTransaction[]> {
+  return fetchAllPages<ZenhrTimeoffTransaction>(
+    `/api/v3/branches/${branchId}/timeoff_transaction_requests`,
+    { "filter[to_date][from]": from, "filter[from_date][to]": to }
+  );
+}
+
+// Everything the endpoint has, with no date filter at all. Used only by the
+// diagnostic, to tell "ZenHR has no such data" apart from "our filter
+// excluded it" - which no amount of reasoning can settle from the outside.
+export function listTimeoffTransactionsUnfiltered(
+  branchId: number
+): Promise<ZenhrTimeoffTransaction[]> {
+  return fetchAllPages<ZenhrTimeoffTransaction>(
+    `/api/v3/branches/${branchId}/timeoff_transactions`,
+    {}
+  );
+}
+
 export function listTimeoffs(branchId: number): Promise<ZenhrTimeoff[]> {
   return fetchAllPages<ZenhrTimeoff>(`/api/v3/branches/${branchId}/timeoffs`);
 }
