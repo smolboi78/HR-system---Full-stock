@@ -23,7 +23,30 @@ export function ConnectionTester() {
           setResult(null);
           try {
             const res = await fetch("/api/zenhr/test");
-            setResult((await res.json()) as Result);
+            // The endpoint can die without a body - a timeout, or the
+            // function being killed. Reading text first turns that into
+            // something a person can act on rather than a parser error.
+            const raw = await res.text();
+            if (!raw.trim()) {
+              setResult({
+                ok: false,
+                mode: "unknown",
+                message:
+                  `The check returned nothing (HTTP ${res.status}). That usually means it ran out ` +
+                  `of time waiting on ZenHR. Try again; if it keeps happening, ZenHR is not ` +
+                  `answering at the configured address.`,
+              });
+              return;
+            }
+            try {
+              setResult(JSON.parse(raw) as Result);
+            } catch {
+              setResult({
+                ok: false,
+                mode: "unknown",
+                message: `Unexpected reply (HTTP ${res.status}): ${raw.slice(0, 300)}`,
+              });
+            }
           } catch (err) {
             setResult({ ok: false, mode: "unknown", message: (err as Error).message });
           } finally {

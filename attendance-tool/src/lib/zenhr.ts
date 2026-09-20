@@ -160,6 +160,27 @@ export const API_KEY_SCHEMES: KeyScheme[] = [
 
 const KEY_SCHEME_SETTING = "zenhr.apiKeyScheme";
 
+// Long enough for a healthy round trip, short enough that every candidate
+// can be tried inside one function invocation.
+const PROBE_TIMEOUT_MS = 6_000;
+
+// ZenHR answers errors with HTML often enough that a bare res.json() turns a
+// readable failure into "unexpected end of JSON input". This keeps the
+// status and a snippet of whatever actually came back.
+async function parseJson<T>(res: Response, context: string): Promise<T> {
+  const text = await res.text();
+  if (!text.trim()) {
+    throw new Error(`${context}: ZenHR returned an empty body (HTTP ${res.status})`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(
+      `${context}: ZenHR returned ${res.status} with a non-JSON body - ${text.slice(0, 200)}`
+    );
+  }
+}
+
 async function rememberedScheme(): Promise<KeyScheme | null> {
   // An explicit override always wins, so a shape we have not thought of can
   // still be configured without a release.
@@ -259,30 +280,48 @@ export async function testConnection(): Promise<ConnectionTest> {
     const secret = env("ZENHR_API_SECRET");
     const forced = await rememberedScheme();
     const candidates = forced ? [forced] : API_KEY_SCHEMES;
-    const attempts: string[] = [];
-
-    for (const scheme of candidates) {
-      try {
-        const res = await fetch(`${apiOrigin()}/api/v3/who_am_i`, {
-          headers: scheme.headers(key, secret),
-          cache: "no-store",
-        });
-        if (!res.ok) {
-          attempts.push(`${scheme.name}: ${res.status}`);
-          continue;
+    // Tried concurrently rather than one after another: seven serial
+    // attempts against a slow host took long enough to threaten the
+    // function's time limit, which is what produced an empty response and an
+    // unreadable error in the first place. The winner is still chosen by the
+    // order above, so the preferred shape wins if more than one works.
+    const results = await Promise.all(
+      candidates.map(async (scheme) => {
+        try {
+          const res = await fetch(`${apiOrigin()}/api/v3/who_am_i`, {
+            headers: scheme.headers(key, secret),
+            cache: "no-store",
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+          });
+          if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            return {
+              scheme,
+              note: `${scheme.name}: HTTP ${res.status}${body ? ` ${body.slice(0, 120)}` : ""}`,
+            };
+          }
+          return { scheme, who: await parseJson<WhoAmI>(res, scheme.name) };
+        } catch (err) {
+          return { scheme, note: `${scheme.name}: ${(err as Error).message}` };
         }
-        const who = (await res.json()) as WhoAmI;
-        await prisma.setting.upsert({
-          where: { key: KEY_SCHEME_SETTING },
-          create: { key: KEY_SCHEME_SETTING, value: scheme.name },
-          update: { value: scheme.name },
-        });
-        return describeWho(who, mode, ` ZenHR accepts this key as "${scheme.name}".`);
-      } catch (err) {
-        attempts.push(`${scheme.name}: ${(err as Error).message}`);
-      }
+      })
+    );
+
+    const winner = results.find((r) => r.who);
+    if (winner?.who) {
+      await prisma.setting.upsert({
+        where: { key: KEY_SCHEME_SETTING },
+        create: { key: KEY_SCHEME_SETTING, value: winner.scheme.name },
+        update: { value: winner.scheme.name },
+      });
+      return describeWho(
+        winner.who,
+        mode,
+        ` ZenHR accepts this key as "${winner.scheme.name}".`
+      );
     }
 
+    const attempts = results.map((r) => r.note).filter(Boolean) as string[];
     return {
       ok: false,
       mode,
@@ -354,7 +393,7 @@ async function apiGet<T>(path: string, query: Query = {}): Promise<T> {
       `ZenHR GET ${path} failed (${res.status}): ${await res.text().catch(() => "")}`
     );
   }
-  return res.json();
+  return parseJson<T>(res, `GET ${path}`);
 }
 
 // The write endpoint takes multipart/form-data, not JSON - see
