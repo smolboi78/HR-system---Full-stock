@@ -14,9 +14,28 @@ import type { DateStr } from "./dates";
 // data) and timeoff_transactions (the approved leave covering a day).
 
 const PROTOCOL = process.env.ZENHR_PROTOCOL || "https";
-const SCOPES =
-  process.env.ZENHR_SCOPES ||
-  "read:employee read:branch read:attendance_record read:timeoff write:timeoff";
+// ZenHR's scope vocabulary is read: / create: / update: / destroy: - there is
+// no "write:" anything, which is why the OAuth application screen looks
+// read-only until you know that creating is spelled "create:".
+// create:timeoff_transaction_request is the one that lets Apply write a
+// deduction; everything else here is a read the reconcile pass needs.
+export const REQUIRED_SCOPES = [
+  "read:employee",
+  "read:branch",
+  "read:attendance_record",
+  "read:timeoff",
+  "read:timeoff_transaction",
+  "read:timeoff_transaction_request",
+  "read:employee_shift",
+  "read:work_shift",
+  // Balances, so the review pane can show what is actually left rather than
+  // only what has been taken.
+  "timeoff_balances:employee",
+  // The write.
+  "create:timeoff_transaction_request",
+];
+
+const SCOPES = process.env.ZENHR_SCOPES || REQUIRED_SCOPES.join(" ");
 
 function env(name: string): string {
   return process.env[name] || "";
@@ -354,8 +373,11 @@ function describeWho(who: WhoAmI, mode: AuthMode, suffix: string): ConnectionTes
   // token's notion, and an API key carries per-key Read/Write/Update ticks
   // that who_am_i does not report. Saying "no write access" there would be a
   // guess dressed as a finding, so it stays undefined and the page says so.
+  // ZenHR spells the write "create:timeoff_transaction_request". The older
+  // "write:timeoff" spelling never existed - it was an assumption, and
+  // checking for it would report a perfectly capable credential as read-only.
   const canWriteTimeoff = scopes.length
-    ? scopes.some((s) => /write[.:]timeoff/i.test(s))
+    ? scopes.some((s) => /create[.:]timeoff_transaction(_request)?/i.test(s))
     : undefined;
   return {
     ok: true,
