@@ -16,6 +16,7 @@ import {
   type ResolvedRow,
 } from "./reconcile";
 import { BUSINESS_MISSION_EMPLOYEE } from "./roster-seed";
+import { cached, ONE_DAY_MS } from "./cache";
 
 export interface PullResult {
   from: DateStr;
@@ -88,10 +89,16 @@ function normaliseName(s: string): string {
 
 // ZenHR's branch id. A single-branch company, so we take the first branch
 // unless one is pinned by env.
+// Branches barely change, and every pull needs the id. Cached for a day so a
+// pull does not spend a round trip rediscovering it.
+export function listBranchesCached(): Promise<zenhr.ZenhrBranch[]> {
+  return cached("zenhr.branches", ONE_DAY_MS, () => zenhr.listBranches());
+}
+
 export async function resolveBranchId(): Promise<number> {
   const pinned = process.env.ZENHR_BRANCH_ID;
   if (pinned) return Number(pinned);
-  const branches = await zenhr.listBranches();
+  const branches = await listBranchesCached();
   if (!branches.length) throw new Error("ZenHR returned no branches for this account");
   return branches[0].id;
 }
@@ -187,7 +194,9 @@ async function shiftInfo(
 
   let workShifts: zenhr.ZenhrWorkShift[] = [];
   try {
-    workShifts = await zenhr.listWorkShifts(branchId);
+    workShifts = await cached(`zenhr.workShifts.${branchId}`, ONE_DAY_MS, () =>
+      zenhr.listWorkShifts(branchId)
+    );
   } catch (err) {
     warnings.push(`Could not read work shifts from ZenHR: ${(err as Error).message}`);
     return out;
@@ -230,47 +239,65 @@ async function shiftInfo(
   return out;
 }
 
-// What each employee has actually taken of each type this year, straight
-// from ZenHR's own approved transactions. Deliberately not entitlement
-// minus usage: an entitlement figure kept inside this tool would drift from
-// ZenHR and quietly mislead the Emergency/Annual decision.
-async function readBalances(
-  branchId: number,
-  employees: { employmentNumber: string; zenhrEmployeeId: number | null }[],
-  year: number,
-  warnings: string[]
-): Promise<Record<string, BucketBalances>> {
-  const maps = await prisma.leaveTypeMap.findMany();
-  const emergencyId = maps.find((m) => m.bucket === "EMERGENCY")?.zenhrTimeoffId ?? null;
-  const annualId = maps.find((m) => m.bucket === "ANNUAL")?.zenhrTimeoffId ?? null;
-
-  let transactions: zenhr.ZenhrTimeoffTransaction[] = [];
-  try {
-    transactions = await zenhr.listTimeoffTransactions(branchId, `${year}-01-01`, `${year}-12-31`);
-  } catch (err) {
-    warnings.push(`Could not read this year's time-off transactions: ${(err as Error).message}`);
-  }
-
-  const usedByEmployeeAndType = new Map<string, number>();
-  for (const t of transactions) {
-    if (!statusCoversDay(t.status)) continue;
-    const k = `${t.employee.id}|${t.timeoff.id}`;
-    usedByEmployeeAndType.set(k, (usedByEmployeeAndType.get(k) ?? 0) + (t.amount ?? 0));
-  }
-
+// Balances are no longer read during a pull.
+//
+// Fetching every transaction for the calendar year, for the whole branch,
+// was by far the most expensive thing a pull did - unbounded pages, for a
+// figure only ever looked at one employee at a time in the review pane. It
+// is fetched per employee on demand instead (see /api/employee/balance), so
+// opening a row costs one small read and a pull costs none.
+function emptyBalances(
+  employees: { employmentNumber: string }[]
+): Record<string, BucketBalances> {
   const out: Record<string, BucketBalances> = {};
   for (const emp of employees) {
-    const used = (timeoffId: number | null) =>
-      emp.zenhrEmployeeId && timeoffId
-        ? usedByEmployeeAndType.get(`${emp.zenhrEmployeeId}|${timeoffId}`) ?? 0
-        : 0;
     out[emp.employmentNumber] = {
-      emergency: { usedThisYear: used(emergencyId) },
-      annual: { usedThisYear: used(annualId) },
+      emergency: { usedThisYear: 0 },
+      annual: { usedThisYear: 0 },
       remaining: null,
     };
   }
   return out;
+}
+
+// Days of each type ZenHR has approved for one employee this year, read on
+// demand. Kept deliberately narrow: one employee, one year, one endpoint.
+export async function employeeBalances(
+  employmentNumber: string,
+  year: number
+): Promise<BucketBalances> {
+  const branchId = await resolveBranchId();
+  const employee = await prisma.rosterEmployee.findUnique({ where: { employmentNumber } });
+  const maps = await prisma.leaveTypeMap.findMany();
+  const emergencyId = maps.find((m) => m.bucket === "EMERGENCY")?.zenhrTimeoffId ?? null;
+  const annualId = maps.find((m) => m.bucket === "ANNUAL")?.zenhrTimeoffId ?? null;
+
+  const empty: BucketBalances = {
+    emergency: { usedThisYear: 0 },
+    annual: { usedThisYear: 0 },
+    remaining: null,
+  };
+  if (!employee?.zenhrEmployeeId) return empty;
+
+  const transactions = await zenhr.listEmployeeTimeoffTransactions(
+    branchId,
+    employee.zenhrEmployeeId,
+    `${year}-01-01`,
+    `${year}-12-31`
+  );
+
+  const used = (timeoffId: number | null) =>
+    timeoffId === null
+      ? 0
+      : transactions
+          .filter((t) => t.timeoff?.id === timeoffId && statusCoversDay(t.status))
+          .reduce((sum, t) => sum + (t.amount ?? 0), 0);
+
+  return {
+    emergency: { usedThisYear: Math.round(used(emergencyId) * 100) / 100 },
+    annual: { usedThisYear: Math.round(used(annualId) * 100) / 100 },
+    remaining: null,
+  };
 }
 
 export interface PullOptions {
@@ -289,7 +316,7 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
 
   const branchId = await resolveBranchId();
   try {
-    const branches = await zenhr.listBranches();
+    const branches = await listBranchesCached();
     if (branches.length > 1) {
       const others = branches
         .filter((b) => b.id !== branchId)
@@ -316,7 +343,20 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
   const byEmploymentNumber = new Map(roster.map((r) => [r.employmentNumber, r]));
 
   // --- ZenHR attendance ---
-  const attendanceRecords = await zenhr.listAttendanceRecords(branchId, from, to);
+  // These four are independent of one another, so they run together rather
+  // than one after the next.
+  const [attendanceSettled, timeoffTypesSettled, transactionsResult, requestsResult] =
+    await Promise.allSettled([
+      zenhr.listAttendanceRecords(branchId, from, to),
+      cached(`zenhr.timeoffs.${branchId}`, ONE_DAY_MS, () => zenhr.listTimeoffs(branchId)),
+      zenhr.listTimeoffTransactions(branchId, from, to),
+      zenhr.listTimeoffTransactionRequests(branchId, from, to),
+    ]);
+
+  if (attendanceSettled.status === "rejected") {
+    throw new Error(`Could not read attendance records: ${attendanceSettled.reason}`);
+  }
+  const attendanceRecords = attendanceSettled.value;
   const attendance: EngineAttendance[] = [];
   for (const rec of attendanceRecords) {
     const employmentNumber =
@@ -336,7 +376,10 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
   }
 
   // --- ZenHR time off (what makes a no-clock-in day not an absence) ---
-  const timeoffTypes = await zenhr.listTimeoffs(branchId);
+  if (timeoffTypesSettled.status === "rejected") {
+    throw new Error(`Could not read leave types: ${timeoffTypesSettled.reason}`);
+  }
+  const timeoffTypes = timeoffTypesSettled.value;
   const timeoffNameById = new Map(
     timeoffTypes.map((t) => [t.id, t.name?.en || t.name?.ar || `Time off #${t.id}`])
   );
@@ -345,11 +388,6 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
   // manager approves (it lands in timeoff_transaction_requests). Reading only
   // the first makes properly booked leave look like an absence, so both are
   // read and merged on id.
-  const [transactionsResult, requestsResult] = await Promise.allSettled([
-    zenhr.listTimeoffTransactions(branchId, from, to),
-    zenhr.listTimeoffTransactionRequests(branchId, from, to),
-  ]);
-
   if (transactionsResult.status === "rejected") {
     warnings.push(`Could not read time-off transactions: ${transactionsResult.reason}`);
   }
@@ -474,7 +512,7 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
     options.includeShifts === false
       ? new Map<string, ShiftInfo>()
       : await shiftInfo(branchId, roster, warnings, options.refreshShifts === true);
-  const balances = await readBalances(branchId, roster, Number(to.slice(0, 4)), warnings);
+  const balances = emptyBalances(roster);
 
   // Which leave types count as a business mission, so a day covered by one
   // reads as worked rather than as leave.

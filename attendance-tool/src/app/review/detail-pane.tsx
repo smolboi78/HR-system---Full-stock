@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { Balances, Bucket, Reason, Row } from "./types";
 import type { Draft } from "./workspace";
 
@@ -22,10 +23,37 @@ export function DetailPane({
   onApply: () => void;
   applying: boolean;
 }) {
+  // Leave usage is read for this employee when their row is opened. Reading
+  // it for everyone during a pull was the slowest thing the tool did, for a
+  // figure only ever read one person at a time.
+  const [loaded, setLoaded] = useState<Balances | null>(null);
+  const [loadingBalance, setLoadingBalance] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setLoaded(null);
+    setLoadingBalance(true);
+    fetch(
+      `/api/employee/balance?employmentNumber=${encodeURIComponent(row.employmentNumber)}` +
+        `&year=${row.date.slice(0, 4)}`
+    )
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!cancelled && json && !json.error) setLoaded(json as Balances);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoadingBalance(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [row.employmentNumber, row.date]);
+
+  const shown = loaded ?? balances;
   const reason = draft.reasonCode ? reasons.find((r) => r.code === draft.reasonCode) : undefined;
   const bucket: Bucket = draft.bucket ?? reason?.defaultBucket ?? "NONE";
   const deducts = Boolean(reason && bucket !== "NONE" && reason.defaultDays > 0);
-  const emergencyRemaining = balances?.remaining?.emergency ?? null;
+  const emergencyRemaining = shown?.remaining?.emergency ?? null;
   // Only warn when ZenHR has actually told us the balance. Guessing from an
   // entitlement kept in this tool would be worse than saying nothing.
   const shortOfBalance =
@@ -78,22 +106,32 @@ export function DetailPane({
       <div className="facts" style={{ marginTop: 0 }}>
         <Fact
           k="Emergency"
-          v={balanceText(balances?.emergency.usedThisYear, balances?.remaining?.emergency)}
+          v={
+            loadingBalance && !loaded
+              ? "Reading from ZenHR…"
+              : balanceText(shown?.emergency.usedThisYear, shown?.remaining?.emergency)
+          }
         />
         <Fact
           k="Annual"
-          v={balanceText(balances?.annual.usedThisYear, balances?.remaining?.annual)}
+          v={
+            loadingBalance && !loaded
+              ? "Reading from ZenHR…"
+              : balanceText(shown?.annual.usedThisYear, shown?.remaining?.annual)
+          }
         />
         <Fact
           k="Both together"
           v={
-            balances
-              ? `${round(balances.emergency.usedThisYear + balances.annual.usedThisYear)} days taken this year`
-              : "Unknown"
+            loaded
+              ? `${round(loaded.emergency.usedThisYear + loaded.annual.usedThisYear)} days taken this year`
+              : loadingBalance
+                ? "Reading from ZenHR…"
+                : "Unknown"
           }
         />
       </div>
-      {balances?.remaining === null && (
+      {loaded?.remaining === null && (
         <p className="tiny muted" style={{ marginTop: 2 }}>
           Days taken come from ZenHR&apos;s own approved transactions. Remaining balance is only
           shown once ZenHR exposes it — check the employee in ZenHR if the balance decides the call.
