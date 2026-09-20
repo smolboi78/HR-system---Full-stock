@@ -630,7 +630,11 @@ export function listTimeoffTransactionRequests(
 ): Promise<ZenhrTimeoffTransaction[]> {
   return fetchAllPages<ZenhrTimeoffTransaction>(
     `/api/v3/branches/${branchId}/timeoff_transaction_requests`,
-    { "filter[to_date][from]": from, "filter[from_date][to]": to }
+    { "filter[to_date][from]": from, "filter[from_date][to]": to },
+    // This endpoint appears not to narrow by these filters the way
+    // timeoff_transactions does - reading it unbounded ran past 15s against a
+    // real account. Capped, with the overlap decided in our own code.
+    { maxPages: 5, pageDelayMs: 150 }
   );
 }
 

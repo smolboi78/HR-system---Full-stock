@@ -201,6 +201,59 @@ describe("days off follow the ZenHR shift", () => {
   });
 });
 
+describe("hourly leave covers only part of a day", () => {
+  // Taken from a real ZenHR record: a four-hour permission, 16:00-20:00,
+  // not a day off. Treating it as a whole day would hide the rest of that
+  // day from review entirely.
+  const permission = {
+    employmentNumber: "124",
+    from: "2026-09-07",
+    to: "2026-09-07",
+    timeoffId: 683251,
+    timeoffName: "Personal Permission",
+    status: "added_by_hr",
+    notes: "",
+    fromTime: "16:00",
+    toTime: "20:00",
+    amount: 4,
+    partialDay: true,
+  };
+
+  it("settles the day when the person also clocked in", () => {
+    const row = run({
+      timeoff: [permission],
+      attendance: [
+        {
+          employmentNumber: "124",
+          date: "2026-09-07",
+          entryTime: "2026-09-07T06:00:00.000Z",
+          exitTime: "2026-09-07T13:00:00.000Z",
+          missingStatus: "complete",
+          suspicious: false,
+        },
+      ],
+    }).find((r) => r.date === "2026-09-07")!;
+    expect(row.state).toBe("PRESENT");
+    expect(row.detail).toContain("16:00-20:00");
+  });
+
+  it("raises it for review when nothing covers the rest of the day", () => {
+    const row = run({ timeoff: [permission] }).find((r) => r.date === "2026-09-07")!;
+    expect(row.state).toBe("EXCEPTION");
+    expect(row.detail).toContain("only part of the day");
+    expect(row.suggestedReason).toBeNull();
+  });
+
+  it("still treats a midnight-to-midnight transaction as a whole day", () => {
+    const row = run({
+      timeoff: [
+        { ...permission, fromTime: "00:00", toTime: "00:00", amount: 1, partialDay: false },
+      ],
+    }).find((r) => r.date === "2026-09-07")!;
+    expect(row.state).toBe("TIME_OFF");
+  });
+});
+
 describe("unexplained gaps", () => {
   it("suggests a full-day absence when there is no record and no time off", () => {
     const rows = run();

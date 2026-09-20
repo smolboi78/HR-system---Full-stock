@@ -48,6 +48,13 @@ export interface EngineTimeoff {
   timeoffName: string;
   status: string;
   notes: string;
+  // Times as ZenHR recorded them, when the leave covers only part of a day
+  // (an hourly permission such as 16:00-20:00 rather than a whole day).
+  fromTime?: string | null;
+  toTime?: string | null;
+  // Whole days, or hours - ZenHR's own figure for this transaction.
+  amount?: number | null;
+  partialDay?: boolean;
 }
 
 export interface EngineVisits {
@@ -261,6 +268,35 @@ export function reconcile(input: ReconcileInput): ResolvedRow[] {
         // present with the mission named, and nothing is ever charged for it
         // - whether or not the person also clocked in that day.
         const isMission = input.businessMissionTimeoffIds?.has(covering.timeoffId) ?? false;
+
+        // An hourly permission covers only part of the day. Treating it as a
+        // whole day off would hide the rest of that day from review, so it
+        // only settles the day when the person also clocked in; otherwise it
+        // is a short day for a human to judge.
+        if (covering.partialDay && !isMission) {
+          const window = `${covering.fromTime ?? "?"}-${covering.toTime ?? "?"}`;
+          if (att) {
+            rows.push({
+              ...base,
+              state: "PRESENT",
+              timeoffName: covering.timeoffName,
+              detail: `Present, with ${covering.timeoffName} ${window} on file${
+                base.workedHours !== null ? ` and ${base.workedHours}h clocked` : ""
+              }`,
+            });
+          } else {
+            rows.push({
+              ...base,
+              state: "EXCEPTION",
+              timeoffName: covering.timeoffName,
+              detail:
+                `${covering.timeoffName} ${window} covers only part of the day, and there is no ` +
+                `clock-in for the rest of it`,
+              suggestedReason: null,
+            });
+          }
+          continue;
+        }
         rows.push({
           ...base,
           state: isMission ? "PRESENT" : "TIME_OFF",

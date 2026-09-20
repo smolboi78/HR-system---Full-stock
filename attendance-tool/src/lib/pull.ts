@@ -52,6 +52,26 @@ import { statusCoversDay } from "./reconcile";
 // to the branch's timezone first.
 const BRANCH_TIMEZONE = process.env.ZENHR_TIMEZONE || "Africa/Cairo";
 
+// ZenHR records an hourly permission as a transaction whose times span part
+// of a day (16:00-20:00), and a whole day as midnight to midnight. The
+// distinction matters: a half-day permission must not hide the rest of the
+// day from review.
+export function zenhrTime(iso: string): string | null {
+  if (!iso) return null;
+  const match = iso.match(/T(\d{2}:\d{2})/);
+  return match ? match[1] : null;
+}
+
+export function isPartialDay(fromIso: string, toIso: string): boolean {
+  const start = zenhrTime(fromIso);
+  const end = zenhrTime(toIso);
+  if (!start || !end) return false;
+  if (zenhrDate(fromIso) !== zenhrDate(toIso)) return false;
+  // Midnight to midnight is how a full day is written.
+  if (start === "00:00" && end === "00:00") return false;
+  return start !== end;
+}
+
 export function zenhrDate(iso: string): DateStr {
   if (!iso) return iso;
   const hasExplicitOffset = /[+-]\d{2}:?\d{2}$/.test(iso);
@@ -268,6 +288,21 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
   const warnings: string[] = [];
 
   const branchId = await resolveBranchId();
+  try {
+    const branches = await zenhr.listBranches();
+    if (branches.length > 1) {
+      const others = branches
+        .filter((b) => b.id !== branchId)
+        .map((b) => `${typeof b.name === "string" ? b.name : b.name?.en} (${b.id})`);
+      warnings.push(
+        `ZenHR has more than one branch. This pass reads branch ${branchId} only; ` +
+          `${others.join(", ")} ${others.length === 1 ? "is" : "are"} not included. ` +
+          `Set ZENHR_BRANCH_ID to pin a different one.`
+      );
+    }
+  } catch {
+    // Branch listing is informational; never fail a pass over it.
+  }
   warnings.push(...(await syncRosterWithZenhr(branchId)));
 
   const roster = await prisma.rosterEmployee.findMany({
@@ -305,7 +340,39 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
   const timeoffNameById = new Map(
     timeoffTypes.map((t) => [t.id, t.name?.en || t.name?.ar || `Time off #${t.id}`])
   );
-  const timeoffTransactions = await zenhr.listTimeoffTransactions(branchId, from, to);
+  // Leave reaches ZenHR two ways: HR adds it directly (it lands in
+  // timeoff_transactions as AddedByHR) or an employee requests it and a
+  // manager approves (it lands in timeoff_transaction_requests). Reading only
+  // the first makes properly booked leave look like an absence, so both are
+  // read and merged on id.
+  const [transactionsResult, requestsResult] = await Promise.allSettled([
+    zenhr.listTimeoffTransactions(branchId, from, to),
+    zenhr.listTimeoffTransactionRequests(branchId, from, to),
+  ]);
+
+  if (transactionsResult.status === "rejected") {
+    warnings.push(`Could not read time-off transactions: ${transactionsResult.reason}`);
+  }
+  if (requestsResult.status === "rejected") {
+    warnings.push(
+      `Could not read time-off requests: ${requestsResult.reason}. Leave that employees requested ` +
+        `themselves may be missing from this pass, so check anything flagged as an absence.`
+    );
+  }
+
+  const byTransactionId = new Map<number, zenhr.ZenhrTimeoffTransaction>();
+  for (const t of transactionsResult.status === "fulfilled" ? transactionsResult.value : []) {
+    byTransactionId.set(t.id, t);
+  }
+  let fromRequests = 0;
+  for (const t of requestsResult.status === "fulfilled" ? requestsResult.value : []) {
+    // The requests endpoint does not narrow by our date filters the way the
+    // transactions one does, so the overlap is decided here.
+    if (zenhrDate(t.from_date) > to || zenhrDate(t.to_date) < from) continue;
+    if (!byTransactionId.has(t.id)) fromRequests += 1;
+    byTransactionId.set(t.id, t);
+  }
+  const timeoffTransactions = [...byTransactionId.values()];
   const timeoff: EngineTimeoff[] = [];
   // Whatever ZenHR returned, reported back plainly. Leave silently missing is
   // the failure that charges someone for a day they booked, so the pull says
@@ -325,6 +392,10 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
       employmentNumber,
       from: zenhrDate(t.from_date),
       to: zenhrDate(t.to_date),
+      fromTime: zenhrTime(t.from_date),
+      toTime: zenhrTime(t.to_date),
+      amount: t.amount ?? null,
+      partialDay: isPartialDay(t.from_date, t.to_date),
       timeoffId: t.timeoff.id,
       timeoffName: timeoffNameById.get(t.timeoff.id) ?? `Time off #${t.timeoff.id}`,
       status: t.status,
@@ -340,9 +411,9 @@ export async function pullAndReconcile(options: PullOptions): Promise<PullResult
     );
   } else {
     warnings.push(
-      `Time off: ${timeoffTransactions.length} transactions from ZenHR (${[...statusCounts]
-        .map(([status, count]) => `${count} ${status}`)
-        .join(", ")}).` +
+      `Time off: ${timeoffTransactions.length} records from ZenHR` +
+        (fromRequests ? ` (${fromRequests} of them employee requests)` : "") +
+        ` - ${[...statusCounts].map(([status, count]) => `${count} ${status}`).join(", ")}.` +
         (unmatchedTransactions
           ? ` ${unmatchedTransactions} belong to employees not on the roster and were skipped.`
           : "")
