@@ -40,6 +40,15 @@ if (!existingColumns.includes('onHold')) {
 if (!existingColumns.includes('holdNote')) {
   db.exec('ALTER TABLE candidates ADD COLUMN holdNote TEXT');
 }
+if (!existingColumns.includes('source')) {
+  db.exec("ALTER TABLE candidates ADD COLUMN source TEXT NOT NULL DEFAULT 'applied'");
+}
+if (!existingColumns.includes('company')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN company TEXT');
+}
+if (!existingColumns.includes('linkedinUrl')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN linkedinUrl TEXT');
+}
 
 const stmts = {
   list: db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC'),
@@ -47,22 +56,23 @@ const stmts = {
   getCv: db.prepare('SELECT cvFileName, cvBase64 FROM candidates WHERE id = ?'),
   insert: db.prepare(`
     INSERT INTO candidates
-      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote)
+      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl)
     VALUES
-      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote)
+      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl)
   `),
   update: db.prepare(`
     UPDATE candidates SET
       name = @name, role = @role, notes = @notes, score = @score, criteria = @criteria,
       status = @status, cvFileName = @cvFileName, cvBase64 = @cvBase64, cvLink = @cvLink,
       decidedAt = @decidedAt, decisionComment = @decisionComment, reviewNotes = @reviewNotes,
-      onHold = @onHold, holdNote = @holdNote
+      onHold = @onHold, holdNote = @holdNote, source = @source, company = @company, linkedinUrl = @linkedinUrl
     WHERE id = @id
   `),
   remove: db.prepare('DELETE FROM candidates WHERE id = ?'),
 };
 
 const STATUSES = ['pending', 'approved', 'rejected'];
+const SOURCES = ['applied', 'headhunting'];
 
 function rowToCandidate(row, { includeCv } = { includeCv: false }) {
   const candidate = {
@@ -83,6 +93,9 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
     reviewNotes: row.reviewNotes || '',
     onHold: !!row.onHold,
     holdNote: row.holdNote || '',
+    source: row.source || 'applied',
+    company: row.company || '',
+    linkedinUrl: row.linkedinUrl || '',
   };
   if (includeCv) {
     candidate.cvBase64 = row.cvBase64 || null;
@@ -110,11 +123,13 @@ app.get('/candidates/:id/cv', (req, res) => {
 });
 
 app.post('/candidates', (req, res) => {
-  const { name, role, notes, score, criteria, cvFileName, cvBase64, cvLink } = req.body || {};
+  const { name, role, notes, score, criteria, cvFileName, cvBase64, cvLink, source, company, linkedinUrl } = req.body || {};
 
   if (!name || !String(name).trim() || !role || !String(role).trim()) {
     return res.status(400).json({ error: 'Name and role are required.' });
   }
+
+  const resolvedSource = SOURCES.includes(source) ? source : 'applied';
 
   const row = {
     id: crypto.randomUUID(),
@@ -133,6 +148,9 @@ app.post('/candidates', (req, res) => {
     reviewNotes: null,
     onHold: 0,
     holdNote: null,
+    source: resolvedSource,
+    company: company ? String(company) : null,
+    linkedinUrl: linkedinUrl ? String(linkedinUrl) : null,
   };
 
   stmts.insert.run(row);
@@ -192,6 +210,14 @@ app.patch('/candidates/:id', (req, res) => {
   if (body.reviewNotes !== undefined) next.reviewNotes = body.reviewNotes ? String(body.reviewNotes) : null;
   if (body.onHold !== undefined) next.onHold = body.onHold ? 1 : 0;
   if (body.holdNote !== undefined) next.holdNote = body.holdNote ? String(body.holdNote) : null;
+  if (body.source !== undefined) {
+    if (!SOURCES.includes(body.source)) {
+      return res.status(400).json({ error: `source must be one of ${SOURCES.join(', ')}` });
+    }
+    next.source = body.source;
+  }
+  if (body.company !== undefined) next.company = body.company ? String(body.company) : null;
+  if (body.linkedinUrl !== undefined) next.linkedinUrl = body.linkedinUrl ? String(body.linkedinUrl) : null;
 
   stmts.update.run({
     id: next.id,
@@ -209,6 +235,9 @@ app.patch('/candidates/:id', (req, res) => {
     reviewNotes: next.reviewNotes,
     onHold: next.onHold,
     holdNote: next.holdNote,
+    source: next.source,
+    company: next.company,
+    linkedinUrl: next.linkedinUrl,
   });
 
   const updated = stmts.getById.get(req.params.id);
