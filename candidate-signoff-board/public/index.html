@@ -473,7 +473,7 @@ function isTypingInNoteBox(){
   if(!el) return false;
   if(el.tagName === 'TEXTAREA'){
     return el.id.startsWith('rn-text-') || el.id.startsWith('hn-text-') || el.id.startsWith('rev-notes-')
-      || el.id.startsWith('irn-text-') || el.id.startsWith('sc-summary-');
+      || el.id.startsWith('irn-text-') || el.id.startsWith('sc-summary-') || el.id.startsWith('nfm-text-');
   }
   if(el.tagName === 'INPUT'){
     return el.id.startsWith('iv-dt-') || el.id.startsWith('sc-by-');
@@ -545,7 +545,8 @@ function renderHrTabs(){
   const scheduledList = candidates.filter(c => c.status === 'approved' && c.stage === 'scheduled' && !c.archived);
   const shortlistedList = candidates.filter(c => c.status === 'approved' && c.stage === 'shortlisted' && !c.archived);
   const archivedSub = [
-    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected') },
+    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected' && c.rejectionReason !== 'not_fit_after_messaging') },
+    { key:'notfit', label:'Not a Fit (LinkedIn)', list: candidates.filter(c => c.status === 'rejected' && c.rejectionReason === 'not_fit_after_messaging') },
     { key:'hold', label:'On Hold', list: candidates.filter(c => c.status === 'pending' && c.onHold) },
     { key:'closed', label:'Closed', list: candidates.filter(c => c.status === 'approved' && c.archived) },
   ];
@@ -556,7 +557,7 @@ function renderHrTabs(){
     { key:'messaged', label:'Messaged on LinkedIn', count: messagedList.length },
     { key:'scheduled', label:'Scheduled for Interview', count: scheduledList.length },
     { key:'shortlisted', label:'Interviewed & Shortlisted', count: shortlistedList.length },
-    { key:'archived', label:'Archived', count: archivedSub[0].list.length + archivedSub[1].list.length + archivedSub[2].list.length },
+    { key:'archived', label:'Archived', count: archivedSub.reduce((sum, t) => sum + t.list.length, 0) },
   ];
 
   let html = renderMainTabBar(mainTabs, activeHrTab, 'setHrTab');
@@ -585,7 +586,7 @@ function renderHrTabs(){
     html += renderSubTabBar(archivedSub, activeArchivedSub, 'setArchivedSub');
     const active = archivedSub.find(t => t.key === activeArchivedSub) || archivedSub[0];
     let list = active.list;
-    let emptyMessage = { rejected:'No rejected candidates yet.', hold:'No candidates on hold.', closed:'Nothing closed yet.' }[active.key];
+    let emptyMessage = { rejected:'No rejected candidates yet.', notfit:'No LinkedIn candidates marked not a fit yet.', hold:'No candidates on hold.', closed:'Nothing closed yet.' }[active.key];
     if(active.key === 'rejected'){
       html += renderFilterBar([
         { value:'all', label:'All reasons' },
@@ -813,6 +814,7 @@ function renderCard(c, ceoActions){
 function rejectionReasonLabel(r){
   if(r === 'after_interview') return 'Rejected after interview';
   if(r === 'after_second_screening') return 'Rejected after second screening';
+  if(r === 'not_fit_after_messaging') return 'Not a fit after messaging';
   return 'Rejected';
 }
 
@@ -822,11 +824,12 @@ function renderStagePanel(c){
   let html = `<div class="stage-panel">
     <div class="field">
       <label for="stage-move-${c.id}">Funnel stage</label>
-      <select id="stage-move-${c.id}" onchange="moveStage('${c.id}', this.value)">
+      <select id="stage-move-${c.id}" onchange="onFunnelStageSelect('${c.id}', this.value)">
         <option value="approved"${stage==='approved'?' selected':''}>Approved for Interview</option>
         ${(c.source === 'headhunting' || stage === 'messaged') ? `<option value="messaged"${stage==='messaged'?' selected':''}>Messaged on LinkedIn</option>` : ''}
         <option value="scheduled"${stage==='scheduled'?' selected':''}>Scheduled for Interview</option>
         <option value="shortlisted"${stage==='shortlisted'?' selected':''}>Interviewed &amp; Shortlisted</option>
+        ${stage === 'messaged' ? `<option value="reject_not_fit">Not a fit (after messaging)</option>` : ''}
       </select>
     </div>`;
 
@@ -892,6 +895,13 @@ function renderStagePanel(c){
   if(stage === 'messaged'){
     html += `<div class="stage-actions">
       <button class="ghost-btn" onclick="moveStage('${c.id}','scheduled')">Move to Scheduled for Interview</button>
+    </div>
+    <div class="reject-note" id="nfm-${c.id}">
+      <textarea id="nfm-text-${c.id}" placeholder="Optional reason (not a fit after messaging)"></textarea>
+      <div class="mini-actions">
+        <button class="mini-confirm" onclick="rejectNotFitAfterMessaging('${c.id}')">Confirm — not a fit</button>
+        <button class="mini-cancel" onclick="cancelNotFitNote('${c.id}')">Cancel</button>
+      </div>
     </div>`;
   }
 
@@ -1437,6 +1447,39 @@ async function decide(id, status){
 }
 
 /* ============ Funnel stage actions (HR) ============ */
+function onFunnelStageSelect(id, value){
+  if(value === 'reject_not_fit'){
+    const sel = document.getElementById('stage-move-' + id);
+    if(sel) sel.value = 'messaged';
+    const el = document.getElementById('nfm-' + id);
+    if(el) el.classList.add('show');
+    return;
+  }
+  moveStage(id, value);
+}
+
+function cancelNotFitNote(id){
+  const el = document.getElementById('nfm-' + id);
+  if(el) el.classList.remove('show');
+}
+
+async function rejectNotFitAfterMessaging(id){
+  const el = document.getElementById('nfm-text-' + id);
+  const comment = el ? el.value.trim() : '';
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected', rejectionReason: 'not_fit_after_messaging', decisionComment: comment })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Marked not a fit — archived');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not save — try again');
+  }
+}
+
 async function moveStage(id, stage){
   try{
     const res = await fetch('/candidates/' + id, {
