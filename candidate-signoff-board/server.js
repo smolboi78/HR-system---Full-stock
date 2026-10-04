@@ -80,6 +80,11 @@ if (!existingColumns.includes('cvHash')) {
   db.exec('ALTER TABLE candidates ADD COLUMN cvHash TEXT');
 }
 
+// Candidates approved before the `stage` column existed have stage=NULL, which makes
+// them fail every HR tab's `stage === 'approved'` filter — backfill them into the
+// first funnel stage. Safe to run on every boot: it only ever touches NULL stages.
+db.exec("UPDATE candidates SET stage = 'approved' WHERE status = 'approved' AND stage IS NULL");
+
 const stmts = {
   list: db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC'),
   getById: db.prepare('SELECT * FROM candidates WHERE id = ?'),
