@@ -422,9 +422,22 @@ function enterApp(){
   if(currentRole === 'hr'){ renderAddPanel(); } else { document.getElementById('hrAddPanel').innerHTML = ''; }
   loadCandidates();
   if(pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(loadCandidates, 20000);
+  pollTimer = setInterval(autoRefresh, 20000);
 }
 function manualRefresh(){ loadCandidates(true); }
+
+// True while the user is actively typing into a reject/hold/reviewer notes box —
+// a passive refresh here would wipe out whatever they haven't saved yet.
+function isTypingInNoteBox(){
+  const el = document.activeElement;
+  if(!el || el.tagName !== 'TEXTAREA') return false;
+  return el.id.startsWith('rn-text-') || el.id.startsWith('hn-text-') || el.id.startsWith('rev-notes-');
+}
+
+function autoRefresh(){
+  if(editingId || isTypingInNoteBox()) return;
+  loadCandidates();
+}
 
 /* ============ Loading candidates ============ */
 async function loadCandidates(isManual){
@@ -684,7 +697,7 @@ function toggleEdit(id){
     delete editScores[id];
     delete editCriteriaCount[id];
     delete editSources[id];
-    if(!pollTimer) pollTimer = setInterval(loadCandidates, 20000);
+    if(!pollTimer) pollTimer = setInterval(autoRefresh, 20000);
   }
   renderBoard();
 }
@@ -1133,7 +1146,7 @@ async function markHandled(id){
 
 /* ============ Init ============ */
 window.addEventListener('DOMContentLoaded', loadRole);
-window.addEventListener('focus', () => { if(currentRole && !editingId) loadCandidates(); });
+window.addEventListener('focus', () => { if(currentRole && !editingId && !isTypingInNoteBox()) loadCandidates(); });
 </script>
 </body>
 </html>
