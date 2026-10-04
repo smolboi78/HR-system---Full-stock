@@ -49,6 +49,9 @@ if (!existingColumns.includes('company')) {
 if (!existingColumns.includes('linkedinUrl')) {
   db.exec('ALTER TABLE candidates ADD COLUMN linkedinUrl TEXT');
 }
+if (!existingColumns.includes('archived')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+}
 
 const stmts = {
   list: db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC'),
@@ -56,16 +59,17 @@ const stmts = {
   getCv: db.prepare('SELECT cvFileName, cvBase64 FROM candidates WHERE id = ?'),
   insert: db.prepare(`
     INSERT INTO candidates
-      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl)
+      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl, archived)
     VALUES
-      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl)
+      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl, @archived)
   `),
   update: db.prepare(`
     UPDATE candidates SET
       name = @name, role = @role, notes = @notes, score = @score, criteria = @criteria,
       status = @status, cvFileName = @cvFileName, cvBase64 = @cvBase64, cvLink = @cvLink,
       decidedAt = @decidedAt, decisionComment = @decisionComment, reviewNotes = @reviewNotes,
-      onHold = @onHold, holdNote = @holdNote, source = @source, company = @company, linkedinUrl = @linkedinUrl
+      onHold = @onHold, holdNote = @holdNote, source = @source, company = @company, linkedinUrl = @linkedinUrl,
+      archived = @archived
     WHERE id = @id
   `),
   remove: db.prepare('DELETE FROM candidates WHERE id = ?'),
@@ -96,6 +100,7 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
     source: row.source || 'applied',
     company: row.company || '',
     linkedinUrl: row.linkedinUrl || '',
+    archived: !!row.archived,
   };
   if (includeCv) {
     candidate.cvBase64 = row.cvBase64 || null;
@@ -151,6 +156,7 @@ app.post('/candidates', (req, res) => {
     source: resolvedSource,
     company: company ? String(company) : null,
     linkedinUrl: linkedinUrl ? String(linkedinUrl) : null,
+    archived: 0,
   };
 
   stmts.insert.run(row);
@@ -218,6 +224,7 @@ app.patch('/candidates/:id', (req, res) => {
   }
   if (body.company !== undefined) next.company = body.company ? String(body.company) : null;
   if (body.linkedinUrl !== undefined) next.linkedinUrl = body.linkedinUrl ? String(body.linkedinUrl) : null;
+  if (body.archived !== undefined) next.archived = body.archived ? 1 : 0;
 
   stmts.update.run({
     id: next.id,
@@ -238,6 +245,7 @@ app.patch('/candidates/:id', (req, res) => {
     source: next.source,
     company: next.company,
     linkedinUrl: next.linkedinUrl,
+    archived: next.archived,
   });
 
   const updated = stmts.getById.get(req.params.id);

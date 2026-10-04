@@ -463,11 +463,12 @@ function renderBoard(){
 
 function renderHrTabs(){
   const tabs = [
-    { key:'pending', label:'Pending', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting'), emptyMessage:'No candidates waiting on the reviewer right now.' },
-    { key:'headhunting', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting'), emptyMessage:'No headhunting candidates yet.' },
-    { key:'hold', label:'On Hold', list: candidates.filter(c => c.status === 'pending' && c.onHold), emptyMessage:'No candidates on hold.' },
-    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected'), emptyMessage:'No rejected candidates yet.' },
-    { key:'approved', label:'Approved', list: candidates.filter(c => c.status === 'approved'), emptyMessage:'No approved candidates yet.' },
+    { key:'pending', label:'Pending', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting' && !c.archived), emptyMessage:'No candidates waiting on the reviewer right now.' },
+    { key:'headhunting', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting' && !c.archived), emptyMessage:'No headhunting candidates yet.' },
+    { key:'hold', label:'On Hold', list: candidates.filter(c => c.status === 'pending' && c.onHold && !c.archived), emptyMessage:'No candidates on hold.' },
+    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected' && !c.archived), emptyMessage:'No rejected candidates yet.' },
+    { key:'approved', label:'Approved', list: candidates.filter(c => c.status === 'approved' && !c.archived), emptyMessage:'No approved candidates yet.' },
+    { key:'archived', label:'Archived', list: candidates.filter(c => c.archived), emptyMessage:'Nothing archived yet.' },
   ];
 
   let tabBar = `<div class="ceo-tabs">`;
@@ -556,11 +557,16 @@ function renderCard(c, ceoActions){
       <button class="reject-btn" onclick="toggleRejectNote('${c.id}')">Reject</button>
     </div>`;
   }
-  if(currentRole === 'hr'){
-    bottom += `<button class="handled-btn" onclick="toggleEdit('${c.id}')">${editingId === c.id ? 'Cancel edit' : 'Edit'}</button>`;
-  }
-  if(currentRole === 'hr' && c.status !== 'pending'){
-    bottom += `<button class="handled-btn" onclick="markHandled('${c.id}')">Mark handled — remove</button>`;
+  if(currentRole === 'hr' && c.archived){
+    bottom += `<button class="handled-btn" onclick="restoreCandidate('${c.id}')">Restore</button>`;
+    bottom += `<button class="reject-btn" onclick="toggleDeleteConfirm('${c.id}')">Delete permanently</button>`;
+  }else{
+    if(currentRole === 'hr'){
+      bottom += `<button class="handled-btn" onclick="toggleEdit('${c.id}')">${editingId === c.id ? 'Cancel edit' : 'Edit'}</button>`;
+    }
+    if(currentRole === 'hr' && c.status !== 'pending'){
+      bottom += `<button class="handled-btn" onclick="archiveCandidate('${c.id}')">Mark handled — archive</button>`;
+    }
   }
   bottom += `</div>`;
 
@@ -598,6 +604,17 @@ function renderCard(c, ceoActions){
     </div>`;
   }else if(c.reviewNotes){
     reviewNotesBlock = `<div class="decision-comment">Reviewer notes: "${escapeHtml(c.reviewNotes)}"</div>`;
+  }
+
+  let deleteConfirmBlock = '';
+  if(currentRole === 'hr' && c.archived){
+    deleteConfirmBlock = `<div class="reject-note" id="dc-${c.id}">
+      <p style="font-size:12.5px;color:var(--reject);margin:0 0 8px;">This permanently deletes the candidate and their CV — it cannot be undone.</p>
+      <div class="mini-actions">
+        <button class="mini-confirm" onclick="permanentlyDelete('${c.id}')">Yes, delete permanently</button>
+        <button class="mini-cancel" onclick="toggleDeleteConfirm('${c.id}')">Cancel</button>
+      </div>
+    </div>`;
   }
 
   const holdTag = c.onHold ? `<span class="hold-tag">On hold</span>` : '';
@@ -641,6 +658,7 @@ function renderCard(c, ceoActions){
     ${bottom}
     ${rejectNoteBlock}
     ${holdNoteBlock}
+    ${deleteConfirmBlock}
     ${editBlock}
   </div>`;
 }
@@ -1134,13 +1152,49 @@ async function decide(id, status){
   }
 }
 
-async function markHandled(id){
+async function archiveCandidate(id){
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived: true })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Archived — find it under the Archived tab');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not archive this entry — try again');
+  }
+}
+
+async function restoreCandidate(id){
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived: false })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Restored');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not restore this entry — try again');
+  }
+}
+
+function toggleDeleteConfirm(id){
+  const el = document.getElementById('dc-' + id);
+  if(el) el.classList.toggle('show');
+}
+
+async function permanentlyDelete(id){
   try{
     const res = await fetch('/candidates/' + id, { method: 'DELETE' });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Deleted permanently');
     loadCandidates();
   }catch(e){
-    showToast('Could not remove this entry');
+    showToast('Could not delete this entry — try again');
   }
 }
 
