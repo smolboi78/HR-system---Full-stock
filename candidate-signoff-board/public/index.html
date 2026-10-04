@@ -541,6 +541,7 @@ function renderHrTabs(){
     { key:'linkedin', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting') },
   ];
   const approvedList = candidates.filter(c => c.status === 'approved' && c.stage === 'approved' && !c.archived);
+  const messagedList = candidates.filter(c => c.status === 'approved' && c.stage === 'messaged' && !c.archived);
   const scheduledList = candidates.filter(c => c.status === 'approved' && c.stage === 'scheduled' && !c.archived);
   const shortlistedList = candidates.filter(c => c.status === 'approved' && c.stage === 'shortlisted' && !c.archived);
   const archivedSub = [
@@ -552,6 +553,7 @@ function renderHrTabs(){
   const mainTabs = [
     { key:'screening', label:'Initial Screening (HR)', count: screeningSub[0].list.length + screeningSub[1].list.length },
     { key:'approved', label:'Approved for Interview', count: approvedList.length },
+    { key:'messaged', label:'Messaged on LinkedIn', count: messagedList.length },
     { key:'scheduled', label:'Scheduled for Interview', count: scheduledList.length },
     { key:'shortlisted', label:'Interviewed & Shortlisted', count: shortlistedList.length },
     { key:'archived', label:'Archived', count: archivedSub[0].list.length + archivedSub[1].list.length + archivedSub[2].list.length },
@@ -565,6 +567,8 @@ function renderHrTabs(){
     html += renderGrouped(active.list, false, active.key === 'jobpost' ? 'No candidates waiting on the reviewer right now.' : 'No headhunting candidates yet.');
   }else if(activeHrTab === 'approved'){
     html += renderGrouped(approvedList, false, 'No one approved for interview yet.');
+  }else if(activeHrTab === 'messaged'){
+    html += renderGrouped(messagedList, false, 'No one messaged on LinkedIn yet.');
   }else if(activeHrTab === 'scheduled'){
     html += renderFilterBar([
       { value:'all', label:'All' },
@@ -769,7 +773,7 @@ function renderCard(c, ceoActions){
   let stamp = '';
   let decisionComment = '';
   if(c.status === 'approved'){
-    const stageLabel = { approved:'Approved', scheduled:'Scheduled', shortlisted:'Shortlisted' }[c.stage] || 'Approved';
+    const stageLabel = { approved:'Approved', messaged:'Messaged', scheduled:'Scheduled', shortlisted:'Shortlisted' }[c.stage] || 'Approved';
     stamp = `<div class="decision-stamp approved">${stageLabel}</div>`;
   }else if(c.status === 'rejected'){
     stamp = `<div class="decision-stamp rejected">Rejected</div>`;
@@ -820,6 +824,7 @@ function renderStagePanel(c){
       <label for="stage-move-${c.id}">Funnel stage</label>
       <select id="stage-move-${c.id}" onchange="moveStage('${c.id}', this.value)">
         <option value="approved"${stage==='approved'?' selected':''}>Approved for Interview</option>
+        ${(c.source === 'headhunting' || stage === 'messaged') ? `<option value="messaged"${stage==='messaged'?' selected':''}>Messaged on LinkedIn</option>` : ''}
         <option value="scheduled"${stage==='scheduled'?' selected':''}>Scheduled for Interview</option>
         <option value="shortlisted"${stage==='shortlisted'?' selected':''}>Interviewed &amp; Shortlisted</option>
       </select>
@@ -878,6 +883,13 @@ function renderStagePanel(c){
   }
 
   if(stage === 'approved'){
+    html += `<div class="stage-actions">
+      ${c.source === 'headhunting' ? `<button class="ghost-btn" onclick="moveStage('${c.id}','messaged')">Mark messaged on LinkedIn</button>` : ''}
+      <button class="ghost-btn" onclick="moveStage('${c.id}','scheduled')">Move to Scheduled for Interview</button>
+    </div>`;
+  }
+
+  if(stage === 'messaged'){
     html += `<div class="stage-actions">
       <button class="ghost-btn" onclick="moveStage('${c.id}','scheduled')">Move to Scheduled for Interview</button>
     </div>`;
@@ -1344,6 +1356,7 @@ function describeCandidateState(c){
   if(c.status === 'rejected') return rejectionReasonLabel(c.rejectionReason).toLowerCase();
   if(c.status === 'pending') return c.onHold ? 'on hold (initial screening)' : 'in initial screening';
   if(c.status === 'approved'){
+    if(c.stage === 'messaged') return 'messaged on LinkedIn';
     if(c.stage === 'scheduled') return 'scheduled for interview';
     if(c.stage === 'shortlisted') return 'interviewed & shortlisted';
     return 'approved for interview';
@@ -1432,7 +1445,7 @@ async function moveStage(id, stage){
       body: JSON.stringify({ stage })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
-    const label = { approved:'Approved for Interview', scheduled:'Scheduled for Interview', shortlisted:'Interviewed & Shortlisted' }[stage] || stage;
+    const label = { approved:'Approved for Interview', messaged:'Messaged on LinkedIn', scheduled:'Scheduled for Interview', shortlisted:'Interviewed & Shortlisted' }[stage] || stage;
     showToast('Moved to ' + label);
     loadCandidates();
   }catch(e){

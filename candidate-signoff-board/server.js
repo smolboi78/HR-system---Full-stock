@@ -117,7 +117,7 @@ const stmts = {
 
 const STATUSES = ['pending', 'approved', 'rejected'];
 const SOURCES = ['applied', 'headhunting'];
-const STAGES = ['approved', 'scheduled', 'shortlisted'];
+const STAGES = ['approved', 'messaged', 'scheduled', 'shortlisted'];
 const REJECTION_REASONS = ['after_second_screening', 'after_interview'];
 
 function hashCv(cvBase64) {
