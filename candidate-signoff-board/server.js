@@ -52,16 +52,44 @@ if (!existingColumns.includes('linkedinUrl')) {
 if (!existingColumns.includes('archived')) {
   db.exec('ALTER TABLE candidates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
 }
+if (!existingColumns.includes('stage')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN stage TEXT');
+}
+if (!existingColumns.includes('rejectionReason')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN rejectionReason TEXT');
+}
+if (!existingColumns.includes('interviewDateTime')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN interviewDateTime TEXT');
+}
+if (!existingColumns.includes('interviewConfirmed')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN interviewConfirmed INTEGER NOT NULL DEFAULT 0');
+}
+if (!existingColumns.includes('scorecardFileName')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN scorecardFileName TEXT');
+}
+if (!existingColumns.includes('scorecardBase64')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN scorecardBase64 TEXT');
+}
+if (!existingColumns.includes('scoreSummary')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN scoreSummary TEXT');
+}
+if (!existingColumns.includes('scoredBy')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN scoredBy TEXT');
+}
+if (!existingColumns.includes('cvHash')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN cvHash TEXT');
+}
 
 const stmts = {
   list: db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC'),
   getById: db.prepare('SELECT * FROM candidates WHERE id = ?'),
   getCv: db.prepare('SELECT cvFileName, cvBase64 FROM candidates WHERE id = ?'),
+  getScorecard: db.prepare('SELECT scorecardFileName, scorecardBase64 FROM candidates WHERE id = ?'),
   insert: db.prepare(`
     INSERT INTO candidates
-      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl, archived)
+      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl, archived, stage, rejectionReason, interviewDateTime, interviewConfirmed, scorecardFileName, scorecardBase64, scoreSummary, scoredBy, cvHash)
     VALUES
-      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl, @archived)
+      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl, @archived, @stage, @rejectionReason, @interviewDateTime, @interviewConfirmed, @scorecardFileName, @scorecardBase64, @scoreSummary, @scoredBy, @cvHash)
   `),
   update: db.prepare(`
     UPDATE candidates SET
@@ -69,7 +97,10 @@ const stmts = {
       status = @status, cvFileName = @cvFileName, cvBase64 = @cvBase64, cvLink = @cvLink,
       decidedAt = @decidedAt, decisionComment = @decisionComment, reviewNotes = @reviewNotes,
       onHold = @onHold, holdNote = @holdNote, source = @source, company = @company, linkedinUrl = @linkedinUrl,
-      archived = @archived
+      archived = @archived, stage = @stage, rejectionReason = @rejectionReason,
+      interviewDateTime = @interviewDateTime, interviewConfirmed = @interviewConfirmed,
+      scorecardFileName = @scorecardFileName, scorecardBase64 = @scorecardBase64,
+      scoreSummary = @scoreSummary, scoredBy = @scoredBy, cvHash = @cvHash
     WHERE id = @id
   `),
   remove: db.prepare('DELETE FROM candidates WHERE id = ?'),
@@ -77,6 +108,13 @@ const stmts = {
 
 const STATUSES = ['pending', 'approved', 'rejected'];
 const SOURCES = ['applied', 'headhunting'];
+const STAGES = ['approved', 'scheduled', 'shortlisted'];
+const REJECTION_REASONS = ['after_second_screening', 'after_interview'];
+
+function hashCv(cvBase64) {
+  if (!cvBase64) return null;
+  return crypto.createHash('sha256').update(cvBase64).digest('hex');
+}
 
 function rowToCandidate(row, { includeCv } = { includeCv: false }) {
   const candidate = {
@@ -91,6 +129,7 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
     hasCv: !!row.cvBase64,
     cvFileName: row.cvFileName || null,
     cvLink: row.cvLink || null,
+    cvHash: row.cvHash || null,
     decision: row.status !== 'pending'
       ? { decidedAt: row.decidedAt, comment: row.decisionComment || '' }
       : null,
@@ -101,6 +140,14 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
     company: row.company || '',
     linkedinUrl: row.linkedinUrl || '',
     archived: !!row.archived,
+    stage: row.stage || null,
+    rejectionReason: row.rejectionReason || null,
+    interviewDateTime: row.interviewDateTime || null,
+    interviewConfirmed: !!row.interviewConfirmed,
+    hasScorecard: !!row.scorecardBase64,
+    scorecardFileName: row.scorecardFileName || null,
+    scoreSummary: row.scoreSummary || '',
+    scoredBy: row.scoredBy || '',
   };
   if (includeCv) {
     candidate.cvBase64 = row.cvBase64 || null;
@@ -125,6 +172,14 @@ app.get('/candidates/:id/cv', (req, res) => {
     return res.status(404).json({ error: 'CV not found' });
   }
   res.json({ cvFileName: row.cvFileName, cvBase64: row.cvBase64 });
+});
+
+app.get('/candidates/:id/scorecard', (req, res) => {
+  const row = stmts.getScorecard.get(req.params.id);
+  if (!row || !row.scorecardBase64) {
+    return res.status(404).json({ error: 'Scorecard not found' });
+  }
+  res.json({ scorecardFileName: row.scorecardFileName, scorecardBase64: row.scorecardBase64 });
 });
 
 app.post('/candidates', (req, res) => {
@@ -157,6 +212,15 @@ app.post('/candidates', (req, res) => {
     company: company ? String(company) : null,
     linkedinUrl: linkedinUrl ? String(linkedinUrl) : null,
     archived: 0,
+    stage: null,
+    rejectionReason: null,
+    interviewDateTime: null,
+    interviewConfirmed: 0,
+    scorecardFileName: null,
+    scorecardBase64: null,
+    scoreSummary: null,
+    scoredBy: null,
+    cvHash: hashCv(cvBase64),
   };
 
   stmts.insert.run(row);
@@ -177,6 +241,7 @@ app.patch('/candidates/:id', (req, res) => {
     if (!STATUSES.includes(body.status)) {
       return res.status(400).json({ error: `status must be one of ${STATUSES.join(', ')}` });
     }
+    const wasApproved = existing.status === 'approved';
     next.status = body.status;
     next.decidedAt = body.status === 'pending' ? null : new Date().toISOString();
     next.decisionComment = body.status === 'pending'
@@ -189,6 +254,39 @@ app.patch('/candidates/:id', (req, res) => {
       next.onHold = 0;
       next.holdNote = null;
     }
+
+    // Freshly approved candidates start at the top of the post-approval funnel,
+    // unless this same request is also explicitly placing them at a stage.
+    if (body.status === 'approved' && !wasApproved && body.stage === undefined) {
+      next.stage = 'approved';
+    }
+    if (body.status !== 'approved') {
+      next.stage = null;
+    }
+
+    // Rejecting defaults to "after second screening" (the Initial Screening flow);
+    // the interview-stage reject flow passes rejectionReason explicitly.
+    if (body.status === 'rejected') {
+      next.rejectionReason = REJECTION_REASONS.includes(body.rejectionReason)
+        ? body.rejectionReason
+        : 'after_second_screening';
+    } else if (body.status !== 'rejected' && body.rejectionReason === undefined) {
+      next.rejectionReason = null;
+    }
+  }
+
+  if (body.stage !== undefined) {
+    if (body.stage !== null && !STAGES.includes(body.stage)) {
+      return res.status(400).json({ error: `stage must be one of ${STAGES.join(', ')}` });
+    }
+    next.stage = body.stage;
+  }
+
+  if (body.rejectionReason !== undefined && body.status === undefined) {
+    if (body.rejectionReason !== null && !REJECTION_REASONS.includes(body.rejectionReason)) {
+      return res.status(400).json({ error: `rejectionReason must be one of ${REJECTION_REASONS.join(', ')}` });
+    }
+    next.rejectionReason = body.rejectionReason;
   }
 
   if (body.name !== undefined) {
@@ -212,6 +310,7 @@ app.patch('/candidates/:id', (req, res) => {
   if (body.cvFileName !== undefined && body.cvBase64 !== undefined) {
     next.cvFileName = body.cvFileName || null;
     next.cvBase64 = body.cvBase64 || null;
+    next.cvHash = hashCv(next.cvBase64);
   }
   if (body.reviewNotes !== undefined) next.reviewNotes = body.reviewNotes ? String(body.reviewNotes) : null;
   if (body.onHold !== undefined) next.onHold = body.onHold ? 1 : 0;
@@ -225,6 +324,14 @@ app.patch('/candidates/:id', (req, res) => {
   if (body.company !== undefined) next.company = body.company ? String(body.company) : null;
   if (body.linkedinUrl !== undefined) next.linkedinUrl = body.linkedinUrl ? String(body.linkedinUrl) : null;
   if (body.archived !== undefined) next.archived = body.archived ? 1 : 0;
+  if (body.interviewDateTime !== undefined) next.interviewDateTime = body.interviewDateTime ? String(body.interviewDateTime) : null;
+  if (body.interviewConfirmed !== undefined) next.interviewConfirmed = body.interviewConfirmed ? 1 : 0;
+  if (body.scorecardFileName !== undefined && body.scorecardBase64 !== undefined) {
+    next.scorecardFileName = body.scorecardFileName || null;
+    next.scorecardBase64 = body.scorecardBase64 || null;
+  }
+  if (body.scoreSummary !== undefined) next.scoreSummary = body.scoreSummary ? String(body.scoreSummary) : null;
+  if (body.scoredBy !== undefined) next.scoredBy = body.scoredBy ? String(body.scoredBy) : null;
 
   stmts.update.run({
     id: next.id,
@@ -246,6 +353,15 @@ app.patch('/candidates/:id', (req, res) => {
     company: next.company,
     linkedinUrl: next.linkedinUrl,
     archived: next.archived,
+    stage: next.stage,
+    rejectionReason: next.rejectionReason,
+    interviewDateTime: next.interviewDateTime,
+    interviewConfirmed: next.interviewConfirmed,
+    scorecardFileName: next.scorecardFileName,
+    scorecardBase64: next.scorecardBase64,
+    scoreSummary: next.scoreSummary,
+    scoredBy: next.scoredBy,
+    cvHash: next.cvHash,
   });
 
   const updated = stmts.getById.get(req.params.id);

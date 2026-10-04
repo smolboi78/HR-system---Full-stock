@@ -127,6 +127,20 @@
   }
   .ceo-tab-btn.active .tab-count{ background:rgba(255,255,255,0.25); color:#fff; }
 
+  .sub-tabs{ display:flex; gap:6px; margin:-10px 0 18px; flex-wrap:wrap; }
+  .sub-tab-btn{
+    background:none; border:none; border-bottom:2px solid transparent;
+    padding:6px 10px 8px; font-size:12.5px; font-weight:600; color:var(--muted);
+  }
+  .sub-tab-btn:hover{ color:var(--brand); }
+  .sub-tab-btn.active{ color:var(--brand); border-bottom-color:var(--brand); }
+  .sub-tab-btn .tab-count{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600; color:var(--faint); margin-left:4px;
+  }
+
+  .filter-bar{ display:flex; align-items:center; gap:8px; margin:-8px 0 16px; font-size:12.5px; color:var(--muted); }
+  .filter-bar select{ width:auto; padding:6px 10px; font-size:12.5px; border:1px solid var(--line-strong); border-radius:7px; background:#fff; }
+
   /* ---------- Add candidate form ---------- */
   .panel{
     background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
@@ -191,7 +205,7 @@
   /* ---------- Candidate card ---------- */
   .card{
     background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
-    padding:16px 18px; margin-bottom:12px; box-shadow:var(--shadow); position:relative; overflow:hidden;
+    padding:16px 18px; margin-bottom:12px; box-shadow:var(--shadow); position:relative;
   }
   .card.status-pending{ border-left:3px solid var(--pending); }
   .card.status-approved{ border-left:3px solid var(--approve); }
@@ -255,6 +269,27 @@
   .company-line{ font-size:12.5px; color:var(--muted); margin:6px 0 0; }
   .company-line strong{ color:var(--ink); font-weight:600; }
 
+  .reject-reason-tag{
+    display:inline-block; margin-top:4px; margin-right:6px;
+    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;
+    padding:2px 9px; border-radius:20px;
+    background:var(--reject-bg); color:var(--reject);
+  }
+
+  .stage-panel{
+    background:var(--surface-2); border-radius:8px; padding:12px 14px; margin:10px 0;
+  }
+  .stage-panel .field-row, .stage-panel .field{ margin-bottom:10px; }
+  .stage-panel .field:last-child, .stage-panel .field-row:last-child{ margin-bottom:0; }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:13px; }
+  .checkbox-row input{ width:auto; }
+  .stage-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .back-link{
+    background:none; border:none; color:var(--muted); font-size:12px; font-weight:600;
+    text-decoration:underline; padding:4px 0;
+  }
+  .back-link:hover{ color:var(--brand); }
+
   .source-toggle{ display:flex; gap:8px; }
   .source-btn{
     background:#fff; border:1.5px solid var(--line-strong); border-radius:8px;
@@ -281,11 +316,12 @@
 
   /* decided stamp */
   .decision-stamp{
-    position:absolute; top:14px; right:16px;
+    position:absolute; top:-10px; right:18px;
     font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:11px;
     letter-spacing:0.08em; text-transform:uppercase;
     border:2px solid; border-radius:6px; padding:4px 10px;
     transform:rotate(4deg);
+    background:var(--surface);
   }
   .decision-stamp.approved{ color:var(--approve); border-color:var(--approve); }
   .decision-stamp.rejected{ color:var(--reject); border-color:var(--reject); }
@@ -372,8 +408,12 @@ let editingId = null;            // candidate id currently open in the edit form
 const editScores = {};           // per-candidate score while editing
 const editCriteriaCount = {};    // per-candidate criteria row counter while editing
 const editSources = {};          // per-candidate source ('applied'|'headhunting') while editing
-let activeCeoTab = 'pending';    // 'pending' | 'hold' | 'rejected' | 'approved' — reviewing view tab
-let activeHrTab = 'pending';     // 'pending' | 'hold' | 'rejected' | 'approved' — screening view tab
+let activeCeoTab = 'screening';       // 'screening' | 'hold'
+let activeCeoScreeningSub = 'jobpost'; // 'jobpost' | 'linkedin'
+let activeHrTab = 'screening';        // 'screening' | 'approved' | 'scheduled' | 'shortlisted' | 'archived'
+let activeHrScreeningSub = 'jobpost';  // 'jobpost' | 'linkedin'
+let activeArchivedSub = 'rejected';   // 'rejected' | 'hold' | 'closed'
+let activeFilter = 'all';             // meaning depends on which tab is active
 
 /* ============ Utilities ============ */
 function escapeHtml(str){
@@ -430,8 +470,15 @@ function manualRefresh(){ loadCandidates(true); }
 // a passive refresh here would wipe out whatever they haven't saved yet.
 function isTypingInNoteBox(){
   const el = document.activeElement;
-  if(!el || el.tagName !== 'TEXTAREA') return false;
-  return el.id.startsWith('rn-text-') || el.id.startsWith('hn-text-') || el.id.startsWith('rev-notes-');
+  if(!el) return false;
+  if(el.tagName === 'TEXTAREA'){
+    return el.id.startsWith('rn-text-') || el.id.startsWith('hn-text-') || el.id.startsWith('rev-notes-')
+      || el.id.startsWith('irn-text-') || el.id.startsWith('sc-summary-');
+  }
+  if(el.tagName === 'INPUT'){
+    return el.id.startsWith('iv-dt-') || el.id.startsWith('sc-by-');
+  }
+  return false;
 }
 
 function autoRefresh(){
@@ -461,52 +508,142 @@ function renderBoard(){
   root.innerHTML = currentRole === 'ceo' ? renderCeoTabs() : renderHrTabs();
 }
 
+function renderMainTabBar(tabs, activeKey, onClickFn){
+  let html = `<div class="ceo-tabs">`;
+  tabs.forEach(t => {
+    html += `<button class="ceo-tab-btn${activeKey === t.key ? ' active' : ''}" onclick="${onClickFn}('${t.key}')">${t.label}<span class="tab-count">${t.count}</span></button>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+function renderSubTabBar(tabs, activeKey, onClickFn){
+  let html = `<div class="sub-tabs">`;
+  tabs.forEach(t => {
+    html += `<button class="sub-tab-btn${activeKey === t.key ? ' active' : ''}" onclick="${onClickFn}('${t.key}')">${t.label}<span class="tab-count">${t.list.length}</span></button>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+function renderFilterBar(options, activeValue, onChangeFn){
+  return `<div class="filter-bar">
+    <label for="filterSelect" style="margin:0;text-transform:none;font-weight:600;letter-spacing:0;">Filter</label>
+    <select id="filterSelect" onchange="${onChangeFn}(this.value)">
+      ${options.map(o => `<option value="${o.value}"${o.value===activeValue?' selected':''}>${escapeHtml(o.label)}</option>`).join('')}
+    </select>
+  </div>`;
+}
+
 function renderHrTabs(){
-  const tabs = [
-    { key:'pending', label:'Pending', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting' && !c.archived), emptyMessage:'No candidates waiting on the reviewer right now.' },
-    { key:'headhunting', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting' && !c.archived), emptyMessage:'No headhunting candidates yet.' },
-    { key:'hold', label:'On Hold', list: candidates.filter(c => c.status === 'pending' && c.onHold && !c.archived), emptyMessage:'No candidates on hold.' },
-    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected' && !c.archived), emptyMessage:'No rejected candidates yet.' },
-    { key:'approved', label:'Approved', list: candidates.filter(c => c.status === 'approved' && !c.archived), emptyMessage:'No approved candidates yet.' },
-    { key:'archived', label:'Archived', list: candidates.filter(c => c.archived), emptyMessage:'Nothing archived yet.' },
+  const screeningSub = [
+    { key:'jobpost', label:'Job Post Applicants', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting') },
+    { key:'linkedin', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting') },
+  ];
+  const approvedList = candidates.filter(c => c.status === 'approved' && c.stage === 'approved' && !c.archived);
+  const scheduledList = candidates.filter(c => c.status === 'approved' && c.stage === 'scheduled' && !c.archived);
+  const shortlistedList = candidates.filter(c => c.status === 'approved' && c.stage === 'shortlisted' && !c.archived);
+  const archivedSub = [
+    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected') },
+    { key:'hold', label:'On Hold', list: candidates.filter(c => c.status === 'pending' && c.onHold) },
+    { key:'closed', label:'Closed', list: candidates.filter(c => c.status === 'approved' && c.archived) },
   ];
 
-  let tabBar = `<div class="ceo-tabs">`;
-  tabs.forEach(t => {
-    tabBar += `<button class="ceo-tab-btn${activeHrTab === t.key ? ' active' : ''}" onclick="setHrTab('${t.key}')">${t.label}<span class="tab-count">${t.list.length}</span></button>`;
-  });
-  tabBar += `</div>`;
+  const mainTabs = [
+    { key:'screening', label:'Initial Screening (HR)', count: screeningSub[0].list.length + screeningSub[1].list.length },
+    { key:'approved', label:'Approved for Interview', count: approvedList.length },
+    { key:'scheduled', label:'Scheduled for Interview', count: scheduledList.length },
+    { key:'shortlisted', label:'Interviewed & Shortlisted', count: shortlistedList.length },
+    { key:'archived', label:'Archived', count: archivedSub[0].list.length + archivedSub[1].list.length + archivedSub[2].list.length },
+  ];
 
-  const active = tabs.find(t => t.key === activeHrTab) || tabs[0];
-  return tabBar + renderGrouped(active.list, false, active.emptyMessage);
+  let html = renderMainTabBar(mainTabs, activeHrTab, 'setHrTab');
+
+  if(activeHrTab === 'screening'){
+    html += renderSubTabBar(screeningSub, activeHrScreeningSub, 'setHrScreeningSub');
+    const active = screeningSub.find(t => t.key === activeHrScreeningSub) || screeningSub[0];
+    html += renderGrouped(active.list, false, active.key === 'jobpost' ? 'No candidates waiting on the reviewer right now.' : 'No headhunting candidates yet.');
+  }else if(activeHrTab === 'approved'){
+    html += renderGrouped(approvedList, false, 'No one approved for interview yet.');
+  }else if(activeHrTab === 'scheduled'){
+    html += renderFilterBar([
+      { value:'all', label:'All' },
+      { value:'confirmed', label:'Confirmed' },
+      { value:'unconfirmed', label:'Not confirmed yet' },
+    ], activeFilter, 'setActiveFilter');
+    let list = scheduledList;
+    if(activeFilter === 'confirmed') list = list.filter(c => c.interviewConfirmed);
+    if(activeFilter === 'unconfirmed') list = list.filter(c => !c.interviewConfirmed);
+    html += renderGrouped(list, false, 'No interviews scheduled yet.');
+  }else if(activeHrTab === 'shortlisted'){
+    html += renderGrouped(shortlistedList, false, 'No one has been interviewed yet.');
+  }else if(activeHrTab === 'archived'){
+    html += renderSubTabBar(archivedSub, activeArchivedSub, 'setArchivedSub');
+    const active = archivedSub.find(t => t.key === activeArchivedSub) || archivedSub[0];
+    let list = active.list;
+    let emptyMessage = { rejected:'No rejected candidates yet.', hold:'No candidates on hold.', closed:'Nothing closed yet.' }[active.key];
+    if(active.key === 'rejected'){
+      html += renderFilterBar([
+        { value:'all', label:'All reasons' },
+        { value:'after_second_screening', label:'Rejected after second screening' },
+        { value:'after_interview', label:'Rejected after interview' },
+      ], activeFilter, 'setActiveFilter');
+      if(activeFilter !== 'all') list = list.filter(c => c.rejectionReason === activeFilter);
+    }
+    html += renderGrouped(list, false, emptyMessage);
+  }
+  return html;
 }
 
 function setHrTab(key){
   activeHrTab = key;
+  activeFilter = 'all';
+  renderBoard();
+}
+function setHrScreeningSub(key){
+  activeHrScreeningSub = key;
+  renderBoard();
+}
+function setArchivedSub(key){
+  activeArchivedSub = key;
+  activeFilter = 'all';
+  renderBoard();
+}
+function setActiveFilter(value){
+  activeFilter = value;
   renderBoard();
 }
 
 function renderCeoTabs(){
-  const tabs = [
-    { key:'pending', label:'Pending', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting'), ceoActions:true, emptyMessage:'Nothing waiting on you right now.' },
-    { key:'headhunting', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting'), ceoActions:true, emptyMessage:'No headhunting candidates yet.' },
-    { key:'hold', label:'On Hold', list: candidates.filter(c => c.status === 'pending' && c.onHold), ceoActions:true, emptyMessage:'No candidates on hold.' },
-    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected'), ceoActions:false, emptyMessage:'No rejected candidates yet.' },
-    { key:'approved', label:'Approved', list: candidates.filter(c => c.status === 'approved'), ceoActions:false, emptyMessage:'No approved candidates yet.' },
+  const screeningSub = [
+    { key:'jobpost', label:'Job Post Applicants', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting') },
+    { key:'linkedin', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting') },
+  ];
+  const holdList = candidates.filter(c => c.status === 'pending' && c.onHold);
+
+  const mainTabs = [
+    { key:'screening', label:'Initial Screening (HR)', count: screeningSub[0].list.length + screeningSub[1].list.length },
+    { key:'hold', label:'On Hold', count: holdList.length },
   ];
 
-  let tabBar = `<div class="ceo-tabs">`;
-  tabs.forEach(t => {
-    tabBar += `<button class="ceo-tab-btn${activeCeoTab === t.key ? ' active' : ''}" onclick="setCeoTab('${t.key}')">${t.label}<span class="tab-count">${t.list.length}</span></button>`;
-  });
-  tabBar += `</div>`;
+  let html = renderMainTabBar(mainTabs, activeCeoTab, 'setCeoTab');
 
-  const active = tabs.find(t => t.key === activeCeoTab) || tabs[0];
-  return tabBar + renderGrouped(active.list, active.ceoActions, active.emptyMessage);
+  if(activeCeoTab === 'screening'){
+    html += renderSubTabBar(screeningSub, activeCeoScreeningSub, 'setCeoScreeningSub');
+    const active = screeningSub.find(t => t.key === activeCeoScreeningSub) || screeningSub[0];
+    html += renderGrouped(active.list, true, active.key === 'jobpost' ? 'Nothing waiting on you right now.' : 'No headhunting candidates yet.');
+  }else{
+    html += renderGrouped(holdList, true, 'No candidates on hold.');
+  }
+  return html;
 }
 
 function setCeoTab(key){
   activeCeoTab = key;
+  renderBoard();
+}
+function setCeoScreeningSub(key){
+  activeCeoScreeningSub = key;
   renderBoard();
 }
 
@@ -564,7 +701,7 @@ function renderCard(c, ceoActions){
     if(currentRole === 'hr'){
       bottom += `<button class="handled-btn" onclick="toggleEdit('${c.id}')">${editingId === c.id ? 'Cancel edit' : 'Edit'}</button>`;
     }
-    if(currentRole === 'hr' && c.status !== 'pending'){
+    if(currentRole === 'hr' && c.status === 'approved'){
       bottom += `<button class="handled-btn" onclick="archiveCandidate('${c.id}')">Mark handled — archive</button>`;
     }
   }
@@ -619,6 +756,9 @@ function renderCard(c, ceoActions){
 
   const holdTag = c.onHold ? `<span class="hold-tag">On hold</span>` : '';
   const headhuntTag = c.source === 'headhunting' ? `<span class="headhunt-tag">LinkedIn headhunting</span>` : '';
+  const rejectReasonTag = (c.status === 'rejected' && c.rejectionReason)
+    ? `<span class="reject-reason-tag">${escapeHtml(rejectionReasonLabel(c.rejectionReason))}</span>`
+    : '';
   const holdNoteDisplay = (!ceoActions && c.onHold && c.holdNote)
     ? `<div class="decision-comment">On hold: "${escapeHtml(c.holdNote)}"</div>`
     : '';
@@ -629,7 +769,8 @@ function renderCard(c, ceoActions){
   let stamp = '';
   let decisionComment = '';
   if(c.status === 'approved'){
-    stamp = `<div class="decision-stamp approved">Approved</div>`;
+    const stageLabel = { approved:'Approved', scheduled:'Scheduled', shortlisted:'Shortlisted' }[c.stage] || 'Approved';
+    stamp = `<div class="decision-stamp approved">${stageLabel}</div>`;
   }else if(c.status === 'rejected'){
     stamp = `<div class="decision-stamp rejected">Rejected</div>`;
     if(c.decision && c.decision.comment){
@@ -638,6 +779,7 @@ function renderCard(c, ceoActions){
   }
 
   const editBlock = (currentRole === 'hr' && editingId === c.id) ? renderEditForm(c) : '';
+  const stagePanel = renderStagePanel(c);
 
   return `<div class="card status-${c.status}">
     ${stamp}
@@ -646,7 +788,7 @@ function renderCard(c, ceoActions){
         <div class="card-name">${escapeHtml(c.name)}</div>
         <div class="card-meta">${daysAgo(c.dateAdded)}${c.status !== 'pending' ? ' · decided ' + (c.decision && c.decision.decidedAt ? new Date(c.decision.decidedAt).toLocaleDateString() : '') : ''}</div>
         ${companyLine}
-        ${headhuntTag}${holdTag}
+        ${headhuntTag}${holdTag}${rejectReasonTag}
       </div>
       ${c.score ? `<div class="score-badge">${c.score}/5</div>` : ''}
     </div>
@@ -655,12 +797,94 @@ function renderCard(c, ceoActions){
     ${decisionComment}
     ${holdNoteDisplay}
     ${reviewNotesBlock}
+    ${stagePanel}
     ${bottom}
     ${rejectNoteBlock}
     ${holdNoteBlock}
     ${deleteConfirmBlock}
     ${editBlock}
   </div>`;
+}
+
+function rejectionReasonLabel(r){
+  if(r === 'after_interview') return 'Rejected after interview';
+  if(r === 'after_second_screening') return 'Rejected after second screening';
+  return 'Rejected';
+}
+
+function renderStagePanel(c){
+  if(currentRole !== 'hr' || c.archived || c.status !== 'approved') return '';
+  const stage = c.stage || 'approved';
+  let html = `<div class="stage-panel">
+    <div class="field">
+      <label for="stage-move-${c.id}">Funnel stage</label>
+      <select id="stage-move-${c.id}" onchange="moveStage('${c.id}', this.value)">
+        <option value="approved"${stage==='approved'?' selected':''}>Approved for Interview</option>
+        <option value="scheduled"${stage==='scheduled'?' selected':''}>Scheduled for Interview</option>
+        <option value="shortlisted"${stage==='shortlisted'?' selected':''}>Interviewed &amp; Shortlisted</option>
+      </select>
+    </div>`;
+
+  if(stage === 'scheduled' || stage === 'shortlisted'){
+    const dtValue = c.interviewDateTime ? c.interviewDateTime.slice(0,16) : '';
+    html += `<div class="field-row">
+      <div class="field">
+        <label for="iv-dt-${c.id}">Interview date &amp; time</label>
+        <input type="datetime-local" id="iv-dt-${c.id}" value="${escapeHtml(dtValue)}">
+      </div>
+      <div class="field" style="display:flex;align-items:flex-end;padding-bottom:9px;">
+        <label class="checkbox-row" style="margin:0;" for="iv-confirmed-${c.id}">
+          <input type="checkbox" id="iv-confirmed-${c.id}" ${c.interviewConfirmed ? 'checked' : ''}>
+          Interview confirmed
+        </label>
+      </div>
+    </div>
+    <div class="stage-actions">
+      <button class="ghost-btn" onclick="saveInterviewDetails('${c.id}')">Save interview details</button>`;
+    if(stage === 'scheduled'){
+      html += `<button class="ghost-btn" onclick="moveStage('${c.id}','shortlisted')">Move to Shortlisted</button>`;
+    }
+    html += `<button class="reject-btn" onclick="toggleInterviewRejectNote('${c.id}')">Reject after interview</button>
+    </div>
+    <div class="reject-note" id="irn-${c.id}">
+      <textarea id="irn-text-${c.id}" placeholder="Optional reason for rejecting after interview"></textarea>
+      <div class="mini-actions">
+        <button class="mini-confirm" onclick="rejectAfterInterview('${c.id}')">Confirm reject</button>
+        <button class="mini-cancel" onclick="toggleInterviewRejectNote('${c.id}')">Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  if(stage === 'shortlisted'){
+    html += `<div class="field-row">
+      <div class="field">
+        <label for="sc-file-${c.id}">Scorecard attachment</label>
+        <input type="file" id="sc-file-${c.id}" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.xlsx,.csv">
+        <div class="hint">${c.hasScorecard ? 'Currently has a scorecard' + (c.scorecardFileName ? ' — ' + escapeHtml(c.scorecardFileName) : '') + '. Choosing a new file replaces it.' : 'Under ~3.5MB.'}</div>
+      </div>
+      <div class="field">
+        <label for="sc-by-${c.id}">Scored by</label>
+        <input type="text" id="sc-by-${c.id}" value="${escapeHtml(c.scoredBy || '')}" placeholder="e.g. Sara, Hiring panel">
+      </div>
+    </div>
+    <div class="field">
+      <label for="sc-summary-${c.id}">Score summary</label>
+      <textarea id="sc-summary-${c.id}" placeholder="Overall score / breakdown">${escapeHtml(c.scoreSummary || '')}</textarea>
+    </div>
+    <div class="stage-actions">
+      <button class="ghost-btn" onclick="saveScorecard('${c.id}')">Save scorecard</button>
+      ${c.hasScorecard ? `<button class="handled-btn" onclick="viewScorecard('${c.id}')">📎 View scorecard</button>` : ''}
+    </div>`;
+  }
+
+  if(stage === 'approved'){
+    html += `<div class="stage-actions">
+      <button class="ghost-btn" onclick="moveStage('${c.id}','scheduled')">Move to Scheduled for Interview</button>
+    </div>`;
+  }
+
+  html += `</div>`;
+  return html;
 }
 
 function toggleRejectNote(id){
@@ -926,7 +1150,8 @@ function renderAddPanel(){
       <div class="field-row">
         <div class="field">
           <label for="f-name">Candidate name</label>
-          <input type="text" id="f-name" placeholder="e.g. Ahmed Samir">
+          <input type="text" id="f-name" placeholder="e.g. Ahmed Samir" oninput="checkDuplicateName(this.value)">
+          <div id="dupWarningName"></div>
         </div>
         <div class="field">
           <label for="f-role">Role</label>
@@ -975,8 +1200,9 @@ function renderAddPanel(){
       <div class="field-row">
         <div class="field">
           <label for="f-cv">CV file (optional)</label>
-          <input type="file" id="f-cv" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg">
+          <input type="file" id="f-cv" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" onchange="checkDuplicateCv(this)">
           <div class="hint">Under ~3.5MB. For bigger files, use the link field instead.</div>
+          <div id="dupWarningCv"></div>
         </div>
         <div class="field">
           <label for="f-cvlink">Or CV link (optional)</label>
@@ -1112,6 +1338,51 @@ function fileToBase64(file){
   });
 }
 
+/* ============ Duplicate detection (HR add form) ============ */
+function describeCandidateState(c){
+  if(c.archived) return 'closed/archived';
+  if(c.status === 'rejected') return rejectionReasonLabel(c.rejectionReason).toLowerCase();
+  if(c.status === 'pending') return c.onHold ? 'on hold (initial screening)' : 'in initial screening';
+  if(c.status === 'approved'){
+    if(c.stage === 'scheduled') return 'scheduled for interview';
+    if(c.stage === 'shortlisted') return 'interviewed & shortlisted';
+    return 'approved for interview';
+  }
+  return c.status;
+}
+
+function checkDuplicateName(name){
+  const warn = document.getElementById('dupWarningName');
+  if(!warn) return;
+  const trimmed = name.trim().toLowerCase();
+  if(!trimmed){ warn.innerHTML = ''; return; }
+  const match = candidates.find(c => c.name.trim().toLowerCase() === trimmed);
+  warn.innerHTML = match
+    ? `<div class="form-msg error">⚠ "${escapeHtml(match.name)}" is already on the board — currently ${escapeHtml(describeCandidateState(match))}.</div>`
+    : '';
+}
+
+async function sha256Hex(str){
+  const enc = new TextEncoder().encode(str);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function checkDuplicateCv(input){
+  const warn = document.getElementById('dupWarningCv');
+  if(!warn) return;
+  const file = input.files[0];
+  if(!file){ warn.innerHTML = ''; return; }
+  try{
+    const base64 = await fileToBase64(file);
+    const hash = await sha256Hex(base64);
+    const match = candidates.find(c => c.cvHash === hash);
+    warn.innerHTML = match
+      ? `<div class="form-msg error">⚠ This exact CV was already uploaded for "${escapeHtml(match.name)}" — currently ${escapeHtml(describeCandidateState(match))}.</div>`
+      : '';
+  }catch(e){ /* duplicate check is best-effort — ignore failures */ }
+}
+
 /* ============ CV viewing ============ */
 async function viewCv(id){
   try{
@@ -1149,6 +1420,113 @@ async function decide(id, status){
     loadCandidates();
   }catch(e){
     showToast('Could not save decision — try again');
+  }
+}
+
+/* ============ Funnel stage actions (HR) ============ */
+async function moveStage(id, stage){
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    const label = { approved:'Approved for Interview', scheduled:'Scheduled for Interview', shortlisted:'Interviewed & Shortlisted' }[stage] || stage;
+    showToast('Moved to ' + label);
+    loadCandidates();
+  }catch(e){
+    showToast('Could not move candidate — try again');
+  }
+}
+
+async function saveInterviewDetails(id){
+  const dtEl = document.getElementById('iv-dt-' + id);
+  const confEl = document.getElementById('iv-confirmed-' + id);
+  const interviewDateTime = dtEl && dtEl.value ? dtEl.value : null;
+  const interviewConfirmed = confEl ? confEl.checked : false;
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interviewDateTime, interviewConfirmed })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Interview details saved');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not save — try again');
+  }
+}
+
+function toggleInterviewRejectNote(id){
+  const el = document.getElementById('irn-' + id);
+  if(el) el.classList.toggle('show');
+}
+
+async function rejectAfterInterview(id){
+  const el = document.getElementById('irn-text-' + id);
+  const comment = el ? el.value.trim() : '';
+  try{
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected', rejectionReason: 'after_interview', decisionComment: comment })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Rejected after interview');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not save — try again');
+  }
+}
+
+async function saveScorecard(id){
+  const fileInput = document.getElementById('sc-file-' + id);
+  const byEl = document.getElementById('sc-by-' + id);
+  const summaryEl = document.getElementById('sc-summary-' + id);
+  const file = fileInput ? fileInput.files[0] : null;
+  if(file && file.size > 3.6 * 1024 * 1024){
+    showToast('That file is too large — under ~3.5MB');
+    return;
+  }
+  const payload = {
+    scoredBy: byEl ? byEl.value.trim() : '',
+    scoreSummary: summaryEl ? summaryEl.value.trim() : '',
+  };
+  try{
+    if(file){
+      payload.scorecardFileName = file.name;
+      payload.scorecardBase64 = await fileToBase64(file);
+    }
+    const res = await fetch('/candidates/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Scorecard saved');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not save scorecard — try again');
+  }
+}
+
+async function viewScorecard(id){
+  try{
+    const res = await fetch('/candidates/' + id + '/scorecard');
+    if(!res.ok){ showToast('Scorecard not found'); return; }
+    const data = await res.json();
+    if(!data || !data.scorecardBase64){ showToast('Scorecard not found'); return; }
+    const link = document.createElement('a');
+    link.href = data.scorecardBase64;
+    link.download = data.scorecardFileName || 'scorecard';
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }catch(e){
+    showToast('Could not open the scorecard');
   }
 }
 
