@@ -141,6 +141,32 @@
   .filter-bar{ display:flex; align-items:center; gap:8px; margin:-8px 0 16px; font-size:12.5px; color:var(--muted); }
   .filter-bar select{ width:auto; padding:6px 10px; font-size:12.5px; border:1px solid var(--line-strong); border-radius:7px; background:#fff; }
 
+  .role-filter{ position:relative; margin:0 0 16px; }
+  .role-filter-btn{
+    background:#fff; border:1px solid var(--line-strong); border-radius:7px;
+    padding:7px 12px; font-size:12.5px; font-weight:600; color:var(--ink);
+    display:inline-flex; align-items:center; gap:6px;
+  }
+  .role-filter-btn:hover{ border-color:var(--brand); color:var(--brand); }
+  .role-filter-panel{
+    position:absolute; top:calc(100% + 6px); left:0; z-index:30;
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:10px; min-width:230px; max-height:280px; overflow-y:auto;
+  }
+  .role-filter-actions{
+    display:flex; justify-content:space-between; gap:8px; margin-bottom:8px;
+    padding-bottom:8px; border-bottom:1px solid var(--surface-2);
+  }
+  .role-filter-mini{
+    background:none; border:1px solid var(--line-strong); border-radius:6px; padding:5px 10px;
+    font-size:11.5px; font-weight:600; color:var(--muted);
+  }
+  .role-filter-mini:hover{ border-color:var(--brand); color:var(--brand); }
+  .role-filter-option{
+    display:flex; align-items:center; gap:8px; font-size:13px; padding:5px 2px; cursor:pointer;
+  }
+  .role-filter-option input{ width:auto; }
+
   /* ---------- Add candidate form ---------- */
   .panel{
     background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
@@ -414,6 +440,8 @@ let activeMainTab = 'screening';      // 'screening' | 'approved' | 'messaged' |
 let activeScreeningSub = 'jobpost';   // 'jobpost' | 'linkedin'
 let activeArchivedSub = 'rejected';   // 'rejected' | 'notfit' | 'hold' | 'closed'
 let activeFilter = 'all';             // meaning depends on which tab is active
+const activeRoleFilters = new Set();  // job titles to show; empty set = show all
+let roleFilterPanelOpen = false;
 
 /* ============ Utilities ============ */
 function escapeHtml(str){
@@ -534,21 +562,64 @@ function renderFilterBar(options, activeValue, onChangeFn){
   </div>`;
 }
 
+function renderRoleFilterBar(allRoles){
+  if(!allRoles.length) return '';
+  const label = activeRoleFilters.size
+    ? `${activeRoleFilters.size} job title${activeRoleFilters.size > 1 ? 's' : ''} selected`
+    : 'All job titles';
+  let html = `<div class="role-filter">
+    <button type="button" class="role-filter-btn" onclick="toggleRoleFilterPanel()">▾ ${escapeHtml(label)}</button>`;
+  if(roleFilterPanelOpen){
+    html += `<div class="role-filter-panel">
+      <div class="role-filter-actions">
+        <button type="button" class="role-filter-mini" onclick="clearRoleFilter()">All job titles</button>
+        <button type="button" class="role-filter-mini" onclick="closeRoleFilterPanel()">Done</button>
+      </div>
+      ${allRoles.map(r => `
+        <label class="role-filter-option">
+          <input type="checkbox" data-role="${escapeHtml(r)}" ${activeRoleFilters.has(r) ? 'checked' : ''} onchange="toggleRoleFilter(this.dataset.role, this.checked)">
+          <span>${escapeHtml(r)}</span>
+        </label>`).join('')}
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function toggleRoleFilterPanel(){
+  roleFilterPanelOpen = !roleFilterPanelOpen;
+  renderBoard();
+}
+function closeRoleFilterPanel(){
+  roleFilterPanelOpen = false;
+  renderBoard();
+}
+function toggleRoleFilter(role, checked){
+  if(checked) activeRoleFilters.add(role); else activeRoleFilters.delete(role);
+  renderBoard();
+}
+function clearRoleFilter(){
+  activeRoleFilters.clear();
+  renderBoard();
+}
+
 function renderFunnelTabs(){
   const isCeo = currentRole === 'ceo';
+  const allRoles = [...new Set(candidates.map(c => c.role).filter(Boolean))].sort();
+  const pool = activeRoleFilters.size ? candidates.filter(c => activeRoleFilters.has(c.role)) : candidates;
   const screeningSub = [
-    { key:'jobpost', label:'Job Post Applicants', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting') },
-    { key:'linkedin', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting') },
+    { key:'jobpost', label:'Job Post Applicants', list: pool.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting') },
+    { key:'linkedin', label:'LinkedIn Headhunting', list: pool.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting') },
   ];
-  const approvedList = candidates.filter(c => c.status === 'approved' && c.stage === 'approved' && !c.archived);
-  const messagedList = candidates.filter(c => c.status === 'approved' && c.stage === 'messaged' && !c.archived);
-  const scheduledList = candidates.filter(c => c.status === 'approved' && c.stage === 'scheduled' && !c.archived);
-  const shortlistedList = candidates.filter(c => c.status === 'approved' && c.stage === 'shortlisted' && !c.archived);
+  const approvedList = pool.filter(c => c.status === 'approved' && c.stage === 'approved' && !c.archived);
+  const messagedList = pool.filter(c => c.status === 'approved' && c.stage === 'messaged' && !c.archived);
+  const scheduledList = pool.filter(c => c.status === 'approved' && c.stage === 'scheduled' && !c.archived);
+  const shortlistedList = pool.filter(c => c.status === 'approved' && c.stage === 'shortlisted' && !c.archived);
   const archivedSub = [
-    { key:'rejected', label:'Rejected', list: candidates.filter(c => c.status === 'rejected' && c.rejectionReason !== 'not_fit_after_messaging') },
-    { key:'notfit', label:'Not a Fit (LinkedIn)', list: candidates.filter(c => c.status === 'rejected' && c.rejectionReason === 'not_fit_after_messaging') },
-    { key:'hold', label:'On Hold', list: candidates.filter(c => c.status === 'pending' && c.onHold) },
-    { key:'closed', label:'Closed', list: candidates.filter(c => c.status === 'approved' && c.archived) },
+    { key:'rejected', label:'Rejected', list: pool.filter(c => c.status === 'rejected' && c.rejectionReason !== 'not_fit_after_messaging') },
+    { key:'notfit', label:'Not a Fit (LinkedIn)', list: pool.filter(c => c.status === 'rejected' && c.rejectionReason === 'not_fit_after_messaging') },
+    { key:'hold', label:'On Hold', list: pool.filter(c => c.status === 'pending' && c.onHold) },
+    { key:'closed', label:'Closed', list: pool.filter(c => c.status === 'approved' && c.archived) },
   ];
 
   const mainTabs = [
@@ -560,7 +631,8 @@ function renderFunnelTabs(){
     { key:'archived', label:'Archived', count: archivedSub.reduce((sum, t) => sum + t.list.length, 0) },
   ];
 
-  let html = renderMainTabBar(mainTabs, activeMainTab, 'setMainTab');
+  let html = renderRoleFilterBar(allRoles);
+  html += renderMainTabBar(mainTabs, activeMainTab, 'setMainTab');
 
   if(activeMainTab === 'screening'){
     html += renderSubTabBar(screeningSub, activeScreeningSub, 'setScreeningSub');
