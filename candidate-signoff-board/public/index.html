@@ -408,11 +408,11 @@ let editingId = null;            // candidate id currently open in the edit form
 const editScores = {};           // per-candidate score while editing
 const editCriteriaCount = {};    // per-candidate criteria row counter while editing
 const editSources = {};          // per-candidate source ('applied'|'headhunting') while editing
-let activeCeoTab = 'screening';       // 'screening' | 'hold'
-let activeCeoScreeningSub = 'jobpost'; // 'jobpost' | 'linkedin'
-let activeHrTab = 'screening';        // 'screening' | 'approved' | 'scheduled' | 'shortlisted' | 'archived'
-let activeHrScreeningSub = 'jobpost';  // 'jobpost' | 'linkedin'
-let activeArchivedSub = 'rejected';   // 'rejected' | 'hold' | 'closed'
+// Shared by both roles — HR and CEO now navigate the identical funnel tab structure,
+// just with different action permissions per section (see renderFunnelTabs).
+let activeMainTab = 'screening';      // 'screening' | 'approved' | 'messaged' | 'scheduled' | 'shortlisted' | 'archived'
+let activeScreeningSub = 'jobpost';   // 'jobpost' | 'linkedin'
+let activeArchivedSub = 'rejected';   // 'rejected' | 'notfit' | 'hold' | 'closed'
 let activeFilter = 'all';             // meaning depends on which tab is active
 
 /* ============ Utilities ============ */
@@ -458,7 +458,7 @@ function enterApp(){
   document.getElementById('roleTag').textContent = currentRole === 'hr' ? 'Screening' : 'Reviewing';
   document.getElementById('headerSub').textContent = currentRole === 'hr'
     ? 'Add screened candidates and track sign-off status'
-    : 'Review and decide on candidates waiting for you';
+    : 'Decide on screening and on-hold candidates, and track the full funnel';
   if(currentRole === 'hr'){ renderAddPanel(); } else { document.getElementById('hrAddPanel').innerHTML = ''; }
   loadCandidates();
   if(pollTimer) clearInterval(pollTimer);
@@ -504,8 +504,7 @@ async function loadCandidates(isManual){
 
 /* ============ Rendering ============ */
 function renderBoard(){
-  const root = document.getElementById('boardRoot');
-  root.innerHTML = currentRole === 'ceo' ? renderCeoTabs() : renderHrTabs();
+  document.getElementById('boardRoot').innerHTML = renderFunnelTabs();
 }
 
 function renderMainTabBar(tabs, activeKey, onClickFn){
@@ -535,7 +534,8 @@ function renderFilterBar(options, activeValue, onChangeFn){
   </div>`;
 }
 
-function renderHrTabs(){
+function renderFunnelTabs(){
+  const isCeo = currentRole === 'ceo';
   const screeningSub = [
     { key:'jobpost', label:'Job Post Applicants', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting') },
     { key:'linkedin', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting') },
@@ -560,17 +560,20 @@ function renderHrTabs(){
     { key:'archived', label:'Archived', count: archivedSub.reduce((sum, t) => sum + t.list.length, 0) },
   ];
 
-  let html = renderMainTabBar(mainTabs, activeHrTab, 'setHrTab');
+  let html = renderMainTabBar(mainTabs, activeMainTab, 'setMainTab');
 
-  if(activeHrTab === 'screening'){
-    html += renderSubTabBar(screeningSub, activeHrScreeningSub, 'setHrScreeningSub');
-    const active = screeningSub.find(t => t.key === activeHrScreeningSub) || screeningSub[0];
-    html += renderGrouped(active.list, false, active.key === 'jobpost' ? 'No candidates waiting on the reviewer right now.' : 'No headhunting candidates yet.');
-  }else if(activeHrTab === 'approved'){
+  if(activeMainTab === 'screening'){
+    html += renderSubTabBar(screeningSub, activeScreeningSub, 'setScreeningSub');
+    const active = screeningSub.find(t => t.key === activeScreeningSub) || screeningSub[0];
+    const emptyMsg = active.key === 'jobpost'
+      ? (isCeo ? 'Nothing waiting on you right now.' : 'No candidates waiting on the reviewer right now.')
+      : 'No headhunting candidates yet.';
+    html += renderGrouped(active.list, isCeo, emptyMsg);
+  }else if(activeMainTab === 'approved'){
     html += renderGrouped(approvedList, false, 'No one approved for interview yet.');
-  }else if(activeHrTab === 'messaged'){
+  }else if(activeMainTab === 'messaged'){
     html += renderGrouped(messagedList, false, 'No one messaged on LinkedIn yet.');
-  }else if(activeHrTab === 'scheduled'){
+  }else if(activeMainTab === 'scheduled'){
     html += renderFilterBar([
       { value:'all', label:'All' },
       { value:'confirmed', label:'Confirmed' },
@@ -580,9 +583,9 @@ function renderHrTabs(){
     if(activeFilter === 'confirmed') list = list.filter(c => c.interviewConfirmed);
     if(activeFilter === 'unconfirmed') list = list.filter(c => !c.interviewConfirmed);
     html += renderGrouped(list, false, 'No interviews scheduled yet.');
-  }else if(activeHrTab === 'shortlisted'){
+  }else if(activeMainTab === 'shortlisted'){
     html += renderGrouped(shortlistedList, false, 'No one has been interviewed yet.');
-  }else if(activeHrTab === 'archived'){
+  }else if(activeMainTab === 'archived'){
     html += renderSubTabBar(archivedSub, activeArchivedSub, 'setArchivedSub');
     const active = archivedSub.find(t => t.key === activeArchivedSub) || archivedSub[0];
     let list = active.list;
@@ -595,18 +598,21 @@ function renderHrTabs(){
       ], activeFilter, 'setActiveFilter');
       if(activeFilter !== 'all') list = list.filter(c => c.rejectionReason === activeFilter);
     }
-    html += renderGrouped(list, false, emptyMessage);
+    // Only the CEO gets decision actions here, and only on the On Hold sub-tab —
+    // every other archived bucket (rejected, not-a-fit, closed) is a terminal,
+    // read-only view for both roles.
+    html += renderGrouped(list, isCeo && active.key === 'hold', emptyMessage);
   }
   return html;
 }
 
-function setHrTab(key){
-  activeHrTab = key;
+function setMainTab(key){
+  activeMainTab = key;
   activeFilter = 'all';
   renderBoard();
 }
-function setHrScreeningSub(key){
-  activeHrScreeningSub = key;
+function setScreeningSub(key){
+  activeScreeningSub = key;
   renderBoard();
 }
 function setArchivedSub(key){
@@ -616,39 +622,6 @@ function setArchivedSub(key){
 }
 function setActiveFilter(value){
   activeFilter = value;
-  renderBoard();
-}
-
-function renderCeoTabs(){
-  const screeningSub = [
-    { key:'jobpost', label:'Job Post Applicants', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting') },
-    { key:'linkedin', label:'LinkedIn Headhunting', list: candidates.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting') },
-  ];
-  const holdList = candidates.filter(c => c.status === 'pending' && c.onHold);
-
-  const mainTabs = [
-    { key:'screening', label:'Initial Screening (HR)', count: screeningSub[0].list.length + screeningSub[1].list.length },
-    { key:'hold', label:'On Hold', count: holdList.length },
-  ];
-
-  let html = renderMainTabBar(mainTabs, activeCeoTab, 'setCeoTab');
-
-  if(activeCeoTab === 'screening'){
-    html += renderSubTabBar(screeningSub, activeCeoScreeningSub, 'setCeoScreeningSub');
-    const active = screeningSub.find(t => t.key === activeCeoScreeningSub) || screeningSub[0];
-    html += renderGrouped(active.list, true, active.key === 'jobpost' ? 'Nothing waiting on you right now.' : 'No headhunting candidates yet.');
-  }else{
-    html += renderGrouped(holdList, true, 'No candidates on hold.');
-  }
-  return html;
-}
-
-function setCeoTab(key){
-  activeCeoTab = key;
-  renderBoard();
-}
-function setCeoScreeningSub(key){
-  activeCeoScreeningSub = key;
   renderBoard();
 }
 
