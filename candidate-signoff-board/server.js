@@ -85,6 +85,10 @@ if (!existingColumns.includes('cvHash')) {
 // first funnel stage. Safe to run on every boot: it only ever touches NULL stages.
 db.exec("UPDATE candidates SET stage = 'approved' WHERE status = 'approved' AND stage IS NULL");
 
+// Same story for rejections made before the funnel redesign: there was only one
+// rejection path back then (the initial-screening one), so backfill them accordingly.
+db.exec("UPDATE candidates SET rejectionReason = 'after_second_screening' WHERE status = 'rejected' AND rejectionReason IS NULL");
+
 const stmts = {
   list: db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC'),
   getById: db.prepare('SELECT * FROM candidates WHERE id = ?'),
