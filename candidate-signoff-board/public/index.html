@@ -736,12 +736,23 @@ function renderCard(c, ceoActions){
     ? `<a class="linkedin-btn" href="${escapeHtml(c.linkedinUrl)}" target="_blank" rel="noopener">🔗 LinkedIn profile</a>`
     : '';
 
+  // The CEO can reconsider their own approval while it's still fresh — i.e. the
+  // candidate hasn't been moved further down the funnel by HR yet. Once HR moves
+  // them to Messaged/Scheduled/Shortlisted, this undo path no longer applies.
+  const ceoReconsider = currentRole === 'ceo' && c.status === 'approved' && c.stage === 'approved' && !c.archived;
+
   let bottom = `<div class="card-bottom"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${cvBtn}${linkedinBtn}</div>`;
   if(ceoActions){
     bottom += `<div class="decision-actions">
       <button class="approve-btn" onclick="decide('${c.id}','approved')">Approve</button>
       <button class="hold-btn" onclick="toggleHoldNote('${c.id}')">${c.onHold ? 'Update hold' : 'On hold'}</button>
       <button class="reject-btn" onclick="toggleRejectNote('${c.id}')">Reject</button>
+    </div>`;
+  }
+  if(ceoReconsider){
+    bottom += `<div class="decision-actions">
+      <button class="hold-btn" onclick="toggleHoldNote('${c.id}')">Move to On Hold</button>
+      <button class="reject-btn" onclick="toggleRejectNote('${c.id}')">Move to Rejected</button>
     </div>`;
   }
   if(currentRole === 'hr' && c.archived){
@@ -758,7 +769,7 @@ function renderCard(c, ceoActions){
   bottom += `</div>`;
 
   let rejectNoteBlock = '';
-  if(ceoActions){
+  if(ceoActions || ceoReconsider){
     rejectNoteBlock = `<div class="reject-note" id="rn-${c.id}">
       <textarea id="rn-text-${c.id}" placeholder="Optional reason (helps HR)"></textarea>
       <div class="mini-actions">
@@ -769,7 +780,7 @@ function renderCard(c, ceoActions){
   }
 
   let holdNoteBlock = '';
-  if(ceoActions){
+  if(ceoActions || ceoReconsider){
     holdNoteBlock = `<div class="reject-note" id="hn-${c.id}">
       <textarea id="hn-text-${c.id}" placeholder="Optional note about why this is on hold">${escapeHtml(c.holdNote || '')}</textarea>
       <div class="mini-actions">
@@ -969,10 +980,13 @@ async function confirmHold(id){
   const el = document.getElementById('hn-text-' + id);
   const holdNote = el ? el.value.trim() : '';
   try{
+    // status: 'pending' is a no-op for an already-pending candidate (the normal
+    // screening hold flow), but is what moves a previously-approved candidate
+    // back to pending + on hold when the CEO reconsiders an approval.
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ onHold: true, holdNote })
+      body: JSON.stringify({ status: 'pending', onHold: true, holdNote })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Marked on hold');
