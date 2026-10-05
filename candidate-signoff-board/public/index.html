@@ -167,6 +167,46 @@
   }
   .role-filter-option input{ width:auto; }
 
+  .filters-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .filters-row .role-filter{ margin-bottom:0; }
+
+  .search-bar-wrap{ position:relative; margin-bottom:12px; }
+  .search-input{
+    width:100%; border:1px solid var(--line-strong); border-radius:8px; padding:9px 34px 9px 12px;
+    font-size:14px; background:#fff; color:var(--ink);
+  }
+  .search-clear-btn{
+    position:absolute; right:6px; top:50%; transform:translateY(-50%);
+    background:none; border:none; color:var(--faint); font-size:18px; line-height:1;
+    padding:4px 7px; cursor:pointer;
+  }
+  .search-clear-btn:hover{ color:var(--reject); }
+  .search-suggestions{
+    position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:35;
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); max-height:320px; overflow-y:auto;
+  }
+  .search-suggestion{
+    display:flex; flex-direction:column; align-items:flex-start; gap:3px; width:100%;
+    background:none; border:none; border-bottom:1px solid var(--surface-2);
+    padding:9px 12px; text-align:left; cursor:pointer;
+  }
+  .search-suggestion:last-child{ border-bottom:none; }
+  .search-suggestion:hover{ background:var(--surface-2); }
+  .ss-name{ font-weight:700; font-size:13.5px; color:var(--ink); }
+  .ss-meta{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); }
+  .ss-role{ font-weight:600; }
+  .ss-tag{
+    font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;
+    padding:1px 7px; border-radius:20px; background:var(--brand-bg); color:var(--brand);
+  }
+  .ss-status{ color:var(--faint); }
+  .search-suggestion-empty{ padding:12px; font-size:12.5px; color:var(--faint); text-align:center; }
+  .search-results-head{
+    display:flex; align-items:center; justify-content:space-between; margin:0 0 14px;
+    font-size:12.5px; color:var(--muted); font-weight:600;
+  }
+
   /* ---------- Add candidate form ---------- */
   .panel{
     background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
@@ -442,6 +482,25 @@ let activeArchivedSub = 'rejected';   // 'rejected' | 'notfit' | 'hold' | 'close
 let activeFilter = 'all';             // meaning depends on which tab is active
 const activeRoleFilters = new Set();  // job titles to show; empty set = show all
 let roleFilterPanelOpen = false;
+const activeStatusFilters = new Set(); // funnel statuses to show; empty set = show all
+let statusFilterPanelOpen = false;
+let searchQuery = '';
+let searchSuggestionsOpen = false;
+
+// Every funnel bucket a candidate can be found in, for the status filter and for
+// scoring a flat cross-tab search result against "which statuses are selected."
+const STATUS_OPTIONS = [
+  { key:'screening_jobpost', label:'Pending (Job Post)', test: c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting' },
+  { key:'screening_linkedin', label:'Pending (LinkedIn Headhunting)', test: c => c.status === 'pending' && !c.onHold && c.source === 'headhunting' },
+  { key:'hold', label:'On Hold', test: c => c.status === 'pending' && c.onHold },
+  { key:'approved', label:'Approved for Interview', test: c => c.status === 'approved' && c.stage === 'approved' && !c.archived },
+  { key:'messaged', label:'Messaged on LinkedIn', test: c => c.status === 'approved' && c.stage === 'messaged' && !c.archived },
+  { key:'scheduled', label:'Scheduled for Interview', test: c => c.status === 'approved' && c.stage === 'scheduled' && !c.archived },
+  { key:'shortlisted', label:'Interviewed & Shortlisted', test: c => c.status === 'approved' && c.stage === 'shortlisted' && !c.archived },
+  { key:'rejected', label:'Rejected', test: c => c.status === 'rejected' && c.rejectionReason !== 'not_fit_after_messaging' },
+  { key:'notfit', label:'Not a Fit (LinkedIn)', test: c => c.status === 'rejected' && c.rejectionReason === 'not_fit_after_messaging' },
+  { key:'closed', label:'Closed', test: c => c.status === 'approved' && c.archived },
+];
 
 /* ============ Utilities ============ */
 function escapeHtml(str){
@@ -504,7 +563,7 @@ function isTypingInNoteBox(){
       || el.id.startsWith('irn-text-') || el.id.startsWith('sc-summary-') || el.id.startsWith('nfm-text-');
   }
   if(el.tagName === 'INPUT'){
-    return el.id.startsWith('iv-dt-') || el.id.startsWith('sc-by-');
+    return el.id.startsWith('iv-dt-') || el.id.startsWith('sc-by-') || el.id === 'searchInput';
   }
   return false;
 }
@@ -603,10 +662,194 @@ function clearRoleFilter(){
   renderBoard();
 }
 
-function renderFunnelTabs(){
+function renderStatusFilterBar(){
+  const label = activeStatusFilters.size
+    ? `${activeStatusFilters.size} status${activeStatusFilters.size > 1 ? 'es' : ''} selected`
+    : 'All statuses';
+  let html = `<div class="role-filter">
+    <button type="button" class="role-filter-btn" onclick="toggleStatusFilterPanel()">▾ ${escapeHtml(label)}</button>`;
+  if(statusFilterPanelOpen){
+    html += `<div class="role-filter-panel">
+      <div class="role-filter-actions">
+        <button type="button" class="role-filter-mini" onclick="clearStatusFilter()">All statuses</button>
+        <button type="button" class="role-filter-mini" onclick="closeStatusFilterPanel()">Done</button>
+      </div>
+      ${STATUS_OPTIONS.map(opt => `
+        <label class="role-filter-option">
+          <input type="checkbox" data-status="${opt.key}" ${activeStatusFilters.has(opt.key) ? 'checked' : ''} onchange="toggleStatusFilter(this.dataset.status, this.checked)">
+          <span>${escapeHtml(opt.label)}</span>
+        </label>`).join('')}
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function toggleStatusFilterPanel(){
+  statusFilterPanelOpen = !statusFilterPanelOpen;
+  renderBoard();
+}
+function closeStatusFilterPanel(){
+  statusFilterPanelOpen = false;
+  renderBoard();
+}
+function toggleStatusFilter(key, checked){
+  if(checked) activeStatusFilters.add(key); else activeStatusFilters.delete(key);
+  renderBoard();
+}
+function clearStatusFilter(){
+  activeStatusFilters.clear();
+  renderBoard();
+}
+
+function isSearchActive(){
+  return searchQuery.trim() !== '' || activeStatusFilters.size > 0;
+}
+
+function candidateMatchesStatusFilter(c){
+  if(!activeStatusFilters.size) return true;
+  return STATUS_OPTIONS.some(opt => activeStatusFilters.has(opt.key) && opt.test(c));
+}
+
+// The search <input> itself is only ever rendered once per full board refresh
+// (tab switches, auto-poll, etc.) — never while the user is actively typing.
+// Live typing instead updates the suggestions box and results area directly via
+// refreshSearchUI(), so the input node is never destroyed/recreated and never
+// loses focus or cursor position mid-word.
+function renderSearchBarShell(){
+  return `<div class="search-bar-wrap">
+    <input type="text" id="searchInput" class="search-input" placeholder="Search candidates by name..."
+      value="${escapeHtml(searchQuery)}" autocomplete="off"
+      oninput="onSearchInput(this.value)" onfocus="onSearchFocus()" onblur="onSearchBlur()">
+    <button type="button" class="search-clear-btn" id="searchClearBtn" style="display:${searchQuery ? 'inline-flex' : 'none'};" onclick="clearSearch()">×</button>
+    <div id="searchSuggestionsBox">${(searchSuggestionsOpen && searchQuery.trim()) ? renderSearchSuggestions(searchQuery.trim()) : ''}</div>
+  </div>`;
+}
+
+function renderSearchSuggestions(query){
+  const lower = query.toLowerCase();
+  const matches = candidates.filter(c => c.name.toLowerCase().includes(lower)).slice(0, 8);
+  if(!matches.length){
+    return `<div class="search-suggestions"><div class="search-suggestion-empty">No candidates match "${escapeHtml(query)}"</div></div>`;
+  }
+  return `<div class="search-suggestions">
+    ${matches.map(c => `
+      <button type="button" class="search-suggestion" onclick="selectSearchSuggestion('${c.id}')">
+        <span class="ss-name">${escapeHtml(c.name)}</span>
+        <span class="ss-meta">
+          <span class="ss-role">${escapeHtml(c.role)}</span>
+          ${c.source === 'headhunting' ? `<span class="ss-tag">LinkedIn</span>` : ''}
+          <span class="ss-status">${escapeHtml(describeCandidateState(c))}</span>
+        </span>
+      </button>`).join('')}
+  </div>`;
+}
+
+// Updates everything search-related EXCEPT the <input> element itself: the
+// suggestions dropdown, the clear button's visibility, and the results area.
+// Called on every keystroke, so it must never touch/replace the input node.
+function refreshSearchUI(){
+  const box = document.getElementById('searchSuggestionsBox');
+  if(box) box.innerHTML = (searchSuggestionsOpen && searchQuery.trim()) ? renderSearchSuggestions(searchQuery.trim()) : '';
+  const clearBtn = document.getElementById('searchClearBtn');
+  if(clearBtn) clearBtn.style.display = searchQuery ? 'inline-flex' : 'none';
+  const body = document.getElementById('filtersAndBody');
+  if(body) body.innerHTML = renderFiltersAndBody();
+}
+
+function onSearchInput(value){
+  searchQuery = value;
+  searchSuggestionsOpen = true;
+  refreshSearchUI();
+}
+function onSearchFocus(){
+  if(searchQuery.trim()){
+    searchSuggestionsOpen = true;
+    refreshSearchUI();
+  }
+}
+function onSearchBlur(){
+  // Delay so a click on a suggestion row registers before the dropdown is removed.
+  setTimeout(() => {
+    searchSuggestionsOpen = false;
+    const box = document.getElementById('searchSuggestionsBox');
+    if(box) box.innerHTML = '';
+  }, 150);
+}
+function selectSearchSuggestion(id){
+  const c = candidates.find(x => x.id === id);
+  if(!c) return;
+  searchQuery = c.name;
+  searchSuggestionsOpen = false;
+  const input = document.getElementById('searchInput');
+  if(input) input.value = c.name;
+  refreshSearchUI();
+}
+function clearSearch(){
+  searchQuery = '';
+  searchSuggestionsOpen = false;
+  const input = document.getElementById('searchInput');
+  if(input) input.value = '';
+  refreshSearchUI();
+}
+function clearSearchAndFilters(){
+  searchQuery = '';
+  searchSuggestionsOpen = false;
+  activeStatusFilters.clear();
+  const input = document.getElementById('searchInput');
+  if(input) input.value = '';
+  refreshSearchUI();
+}
+
+function renderSearchResults(results, isCeo){
+  if(!results.length){
+    return `<div class="empty-state"><div class="es-mark">—</div><p>No candidates match your search.</p></div>`;
+  }
+  const groups = {};
+  results.forEach(c => {
+    const role = c.role || 'Unspecified role';
+    if(!groups[role]) groups[role] = [];
+    groups[role].push(c);
+  });
+  let out = '';
+  Object.keys(groups).sort().forEach(role => {
+    out += `<div class="role-group">
+      <div class="role-group-title">
+        <span class="rg-name">${escapeHtml(role)}</span>
+        <span class="rg-line"></span>
+        <span class="rg-count">${groups[role].length}</span>
+      </div>
+      ${groups[role].map(c => renderCard(c, isCeo && c.status === 'pending')).join('')}
+    </div>`;
+  });
+  return out;
+}
+
+// Everything below the search bar: filters row, plus either the normal tab
+// bar/content or (while a search is active) the flat cross-tab results list.
+// Rendered both as part of a full board refresh and, on its own, every time
+// the user types into the search box (see refreshSearchUI) — kept separate
+// from the search <input> itself so typing never has to touch that node.
+function renderFiltersAndBody(){
   const isCeo = currentRole === 'ceo';
   const allRoles = [...new Set(candidates.map(c => c.role).filter(Boolean))].sort();
   const pool = activeRoleFilters.size ? candidates.filter(c => activeRoleFilters.has(c.role)) : candidates;
+
+  let html = `<div class="filters-row">${renderRoleFilterBar(allRoles)}${renderStatusFilterBar()}</div>`;
+
+  if(isSearchActive()){
+    const query = searchQuery.trim().toLowerCase();
+    const results = pool.filter(c =>
+      (!query || c.name.toLowerCase().includes(query)) && candidateMatchesStatusFilter(c)
+    );
+    html += `<div class="search-results-head">
+      <span>${results.length} match${results.length === 1 ? '' : 'es'}</span>
+      <button type="button" class="role-filter-mini" onclick="clearSearchAndFilters()">Clear search</button>
+    </div>`;
+    html += renderSearchResults(results, isCeo);
+    return html;
+  }
+
   const screeningSub = [
     { key:'jobpost', label:'Job Post Applicants', list: pool.filter(c => c.status === 'pending' && !c.onHold && c.source !== 'headhunting') },
     { key:'linkedin', label:'LinkedIn Headhunting', list: pool.filter(c => c.status === 'pending' && !c.onHold && c.source === 'headhunting') },
@@ -631,7 +874,6 @@ function renderFunnelTabs(){
     { key:'archived', label:'Archived', count: archivedSub.reduce((sum, t) => sum + t.list.length, 0) },
   ];
 
-  let html = renderRoleFilterBar(allRoles);
   html += renderMainTabBar(mainTabs, activeMainTab, 'setMainTab');
 
   if(activeMainTab === 'screening'){
@@ -676,6 +918,10 @@ function renderFunnelTabs(){
     html += renderGrouped(list, isCeo && active.key === 'hold', emptyMessage);
   }
   return html;
+}
+
+function renderFunnelTabs(){
+  return renderSearchBarShell() + `<div id="filtersAndBody">${renderFiltersAndBody()}</div>`;
 }
 
 function setMainTab(key){
