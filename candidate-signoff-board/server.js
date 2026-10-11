@@ -79,6 +79,12 @@ if (!existingColumns.includes('scoredBy')) {
 if (!existingColumns.includes('cvHash')) {
   db.exec('ALTER TABLE candidates ADD COLUMN cvHash TEXT');
 }
+if (!existingColumns.includes('referred')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN referred INTEGER NOT NULL DEFAULT 0');
+}
+if (!existingColumns.includes('referredBy')) {
+  db.exec('ALTER TABLE candidates ADD COLUMN referredBy TEXT');
+}
 
 // Candidates approved before the `stage` column existed have stage=NULL, which makes
 // them fail every HR tab's `stage === 'approved'` filter — backfill them into the
@@ -96,9 +102,9 @@ const stmts = {
   getScorecard: db.prepare('SELECT scorecardFileName, scorecardBase64 FROM candidates WHERE id = ?'),
   insert: db.prepare(`
     INSERT INTO candidates
-      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl, archived, stage, rejectionReason, interviewDateTime, interviewConfirmed, scorecardFileName, scorecardBase64, scoreSummary, scoredBy, cvHash)
+      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl, archived, stage, rejectionReason, interviewDateTime, interviewConfirmed, scorecardFileName, scorecardBase64, scoreSummary, scoredBy, cvHash, referred, referredBy)
     VALUES
-      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl, @archived, @stage, @rejectionReason, @interviewDateTime, @interviewConfirmed, @scorecardFileName, @scorecardBase64, @scoreSummary, @scoredBy, @cvHash)
+      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl, @archived, @stage, @rejectionReason, @interviewDateTime, @interviewConfirmed, @scorecardFileName, @scorecardBase64, @scoreSummary, @scoredBy, @cvHash, @referred, @referredBy)
   `),
   update: db.prepare(`
     UPDATE candidates SET
@@ -109,7 +115,8 @@ const stmts = {
       archived = @archived, stage = @stage, rejectionReason = @rejectionReason,
       interviewDateTime = @interviewDateTime, interviewConfirmed = @interviewConfirmed,
       scorecardFileName = @scorecardFileName, scorecardBase64 = @scorecardBase64,
-      scoreSummary = @scoreSummary, scoredBy = @scoredBy, cvHash = @cvHash
+      scoreSummary = @scoreSummary, scoredBy = @scoredBy, cvHash = @cvHash,
+      referred = @referred, referredBy = @referredBy
     WHERE id = @id
   `),
   remove: db.prepare('DELETE FROM candidates WHERE id = ?'),
@@ -157,6 +164,8 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
     scorecardFileName: row.scorecardFileName || null,
     scoreSummary: row.scoreSummary || '',
     scoredBy: row.scoredBy || '',
+    referred: !!row.referred,
+    referredBy: row.referredBy || '',
   };
   if (includeCv) {
     candidate.cvBase64 = row.cvBase64 || null;
@@ -192,13 +201,21 @@ app.get('/candidates/:id/scorecard', (req, res) => {
 });
 
 app.post('/candidates', (req, res) => {
-  const { name, role, notes, score, criteria, cvFileName, cvBase64, cvLink, source, company, linkedinUrl } = req.body || {};
+  const {
+    name, role, notes, score, criteria, cvFileName, cvBase64, cvLink, source, company, linkedinUrl,
+    referred, referredBy, scheduleNow, interviewDateTime, interviewConfirmed,
+  } = req.body || {};
 
   if (!name || !String(name).trim() || !role || !String(role).trim()) {
     return res.status(400).json({ error: 'Name and role are required.' });
   }
 
   const resolvedSource = SOURCES.includes(source) ? source : 'applied';
+  // Referred candidates can optionally skip Initial Screening and the CEO's
+  // approve/reject step entirely, landing straight in Scheduled for Interview —
+  // scheduleNow implies referred, since the fast-track only makes sense for one.
+  const isReferred = !!referred || !!scheduleNow;
+  const fastTrack = !!scheduleNow;
 
   const row = {
     id: crypto.randomUUID(),
@@ -208,12 +225,12 @@ app.post('/candidates', (req, res) => {
     notes: notes ? String(notes) : null,
     score: Number.isInteger(score) ? score : null,
     criteria: JSON.stringify(Array.isArray(criteria) ? criteria : []),
-    status: 'pending',
+    status: fastTrack ? 'approved' : 'pending',
     cvFileName: cvFileName || null,
     cvBase64: cvBase64 || null,
     cvLink: cvLink || null,
-    decidedAt: null,
-    decisionComment: null,
+    decidedAt: fastTrack ? new Date().toISOString() : null,
+    decisionComment: fastTrack ? 'Referral — added directly to Scheduled for Interview' : null,
     reviewNotes: null,
     onHold: 0,
     holdNote: null,
@@ -221,15 +238,17 @@ app.post('/candidates', (req, res) => {
     company: company ? String(company) : null,
     linkedinUrl: linkedinUrl ? String(linkedinUrl) : null,
     archived: 0,
-    stage: null,
+    stage: fastTrack ? 'scheduled' : null,
     rejectionReason: null,
-    interviewDateTime: null,
-    interviewConfirmed: 0,
+    interviewDateTime: fastTrack && interviewDateTime ? String(interviewDateTime) : null,
+    interviewConfirmed: fastTrack && interviewConfirmed ? 1 : 0,
     scorecardFileName: null,
     scorecardBase64: null,
     scoreSummary: null,
     scoredBy: null,
     cvHash: hashCv(cvBase64),
+    referred: isReferred ? 1 : 0,
+    referredBy: isReferred && referredBy ? String(referredBy) : null,
   };
 
   stmts.insert.run(row);
@@ -341,6 +360,8 @@ app.patch('/candidates/:id', (req, res) => {
   }
   if (body.scoreSummary !== undefined) next.scoreSummary = body.scoreSummary ? String(body.scoreSummary) : null;
   if (body.scoredBy !== undefined) next.scoredBy = body.scoredBy ? String(body.scoredBy) : null;
+  if (body.referred !== undefined) next.referred = body.referred ? 1 : 0;
+  if (body.referredBy !== undefined) next.referredBy = body.referredBy ? String(body.referredBy) : null;
 
   stmts.update.run({
     id: next.id,
@@ -371,6 +392,8 @@ app.patch('/candidates/:id', (req, res) => {
     scoreSummary: next.scoreSummary,
     scoredBy: next.scoredBy,
     cvHash: next.cvHash,
+    referred: next.referred,
+    referredBy: next.referredBy,
   });
 
   const updated = stmts.getById.get(req.params.id);

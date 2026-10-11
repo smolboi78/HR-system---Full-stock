@@ -21,6 +21,8 @@
     --reject-bg:#FBEBE6;
     --pending:#C48A2E;
     --pending-bg:#FBF3E3;
+    --referral:#6B4FA0;
+    --referral-bg:#EFE9F7;
     --line:#DEE1DD;
     --line-strong:#C7CBC6;
     --radius:10px;
@@ -331,6 +333,12 @@
     font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;
     padding:2px 9px; border-radius:20px;
     background:var(--brand-bg); color:var(--brand);
+  }
+  .referral-tag{
+    display:inline-block; margin-top:4px; margin-right:6px;
+    font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;
+    padding:2px 9px; border-radius:20px;
+    background:var(--referral-bg); color:var(--referral);
   }
   .company-line{ font-size:12.5px; color:var(--muted); margin:6px 0 0; }
   .company-line strong{ color:var(--ink); font-weight:600; }
@@ -1063,6 +1071,7 @@ function renderCard(c, ceoActions){
 
   const holdTag = c.onHold ? `<span class="hold-tag">On hold</span>` : '';
   const headhuntTag = c.source === 'headhunting' ? `<span class="headhunt-tag">LinkedIn headhunting</span>` : '';
+  const referralTag = c.referred ? `<span class="referral-tag">Referred</span>` : '';
   const rejectReasonTag = (c.status === 'rejected' && c.rejectionReason)
     ? `<span class="reject-reason-tag">${escapeHtml(rejectionReasonLabel(c.rejectionReason))}</span>`
     : '';
@@ -1071,6 +1080,9 @@ function renderCard(c, ceoActions){
     : '';
   const companyLine = (c.source === 'headhunting' && c.company)
     ? `<div class="company-line">Coming from <strong>${escapeHtml(c.company)}</strong></div>`
+    : '';
+  const referredByLine = (c.referred && c.referredBy)
+    ? `<div class="company-line">Referred by <strong>${escapeHtml(c.referredBy)}</strong></div>`
     : '';
 
   let stamp = '';
@@ -1095,7 +1107,8 @@ function renderCard(c, ceoActions){
         <div class="card-name">${escapeHtml(c.name)}</div>
         <div class="card-meta">${daysAgo(c.dateAdded)}${c.status !== 'pending' ? ' · decided ' + (c.decision && c.decision.decidedAt ? new Date(c.decision.decidedAt).toLocaleDateString() : '') : ''}</div>
         ${companyLine}
-        ${headhuntTag}${holdTag}${rejectReasonTag}
+        ${referredByLine}
+        ${headhuntTag}${referralTag}${holdTag}${rejectReasonTag}
       </div>
       ${c.score ? `<div class="score-badge">${c.score}/5</div>` : ''}
     </div>
@@ -1312,6 +1325,17 @@ function renderEditForm(c){
     </div>
 
     <div class="field">
+      <label class="checkbox-row" for="edit-referred-${c.id}" style="text-transform:none;font-weight:600;letter-spacing:0;">
+        <input type="checkbox" id="edit-referred-${c.id}" ${c.referred ? 'checked' : ''} onchange="toggleEditReferredFields('${c.id}')">
+        This candidate was referred
+      </label>
+    </div>
+    <div class="field" id="edit-referredFields-${c.id}" style="display:${c.referred ? 'block' : 'none'};">
+      <label>Referred by</label>
+      <input type="text" id="edit-referred-by-${c.id}" value="${escapeHtml(c.referredBy || '')}" placeholder="e.g. Mona (Sales)">
+    </div>
+
+    <div class="field">
       <label>Screening score</label>
       <div class="score-picker" id="edit-scorePicker-${c.id}">
         ${[1,2,3,4,5].map(n => `<div class="score-dot${n <= editScores[c.id] ? ' active' : ''}" data-n="${n}" onclick="setEditScore('${c.id}',${n})">${n}</div>`).join('')}
@@ -1392,6 +1416,12 @@ function setEditSource(id, src){
   if(fields) fields.style.display = src === 'headhunting' ? 'grid' : 'none';
 }
 
+function toggleEditReferredFields(id){
+  const checked = document.getElementById('edit-referred-' + id).checked;
+  const fields = document.getElementById('edit-referredFields-' + id);
+  if(fields) fields.style.display = checked ? 'block' : 'none';
+}
+
 async function submitEdit(id){
   const name = document.getElementById('edit-name-' + id).value.trim();
   const role = document.getElementById('edit-role-' + id).value.trim();
@@ -1399,6 +1429,8 @@ async function submitEdit(id){
   const cvLink = document.getElementById('edit-cvlink-' + id).value.trim();
   const company = document.getElementById('edit-company-' + id).value.trim();
   const linkedinUrl = document.getElementById('edit-linkedin-' + id).value.trim();
+  const referred = document.getElementById('edit-referred-' + id).checked;
+  const referredBy = document.getElementById('edit-referred-by-' + id).value.trim();
   const source = editSources[id] || 'applied';
   const fileInput = document.getElementById('edit-cv-' + id);
   const msgEl = document.getElementById('edit-msg-' + id);
@@ -1431,7 +1463,9 @@ async function submitEdit(id){
       cvLink: cvLink || null,
       source,
       company: source === 'headhunting' ? (company || null) : null,
-      linkedinUrl: source === 'headhunting' ? (linkedinUrl || null) : null
+      linkedinUrl: source === 'headhunting' ? (linkedinUrl || null) : null,
+      referred,
+      referredBy: referred ? (referredBy || null) : null
     };
     if(file){
       payload.cvFileName = file.name;
@@ -1507,6 +1541,39 @@ function renderAddPanel(){
       </div>
 
       <div class="field">
+        <label class="checkbox-row" for="f-referred" style="text-transform:none;font-weight:600;letter-spacing:0;">
+          <input type="checkbox" id="f-referred" onchange="toggleReferredFields()">
+          This candidate was referred
+        </label>
+      </div>
+
+      <div id="referredFields" style="display:none;">
+        <div class="field">
+          <label for="f-referred-by">Referred by</label>
+          <input type="text" id="f-referred-by" placeholder="e.g. Mona (Sales)">
+        </div>
+        <div class="field">
+          <label class="checkbox-row" for="f-schedule-now" style="text-transform:none;font-weight:600;letter-spacing:0;">
+            <input type="checkbox" id="f-schedule-now" onchange="toggleScheduleNowFields()">
+            Schedule interview now — skip Initial Screening
+          </label>
+          <div class="hint">Adds them straight to Scheduled for Interview, bypassing the CEO's approve/reject step.</div>
+        </div>
+        <div class="field-row" id="scheduleNowFields" style="display:none;">
+          <div class="field">
+            <label for="f-interview-dt">Interview date &amp; time</label>
+            <input type="datetime-local" id="f-interview-dt">
+          </div>
+          <div class="field" style="display:flex;align-items:flex-end;padding-bottom:9px;">
+            <label class="checkbox-row" style="margin:0;" for="f-interview-confirmed">
+              <input type="checkbox" id="f-interview-confirmed">
+              Interview confirmed
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
         <label>Screening score</label>
         <div class="score-picker" id="scorePicker">
           ${[1,2,3,4,5].map(n => `<div class="score-dot" data-n="${n}" onclick="setScore(${n})">${n}</div>`).join('')}
@@ -1572,6 +1639,22 @@ function setSource(src){
     : 'Key impressions, fit, concerns...';
 }
 
+function toggleReferredFields(){
+  const checked = document.getElementById('f-referred').checked;
+  const fields = document.getElementById('referredFields');
+  if(fields) fields.style.display = checked ? 'block' : 'none';
+  if(!checked){
+    const scheduleNow = document.getElementById('f-schedule-now');
+    if(scheduleNow){ scheduleNow.checked = false; toggleScheduleNowFields(); }
+  }
+}
+
+function toggleScheduleNowFields(){
+  const checked = document.getElementById('f-schedule-now').checked;
+  const fields = document.getElementById('scheduleNowFields');
+  if(fields) fields.style.display = checked ? 'grid' : 'none';
+}
+
 function addCriteriaRow(){
   criteriaRowCount++;
   const id = 'crit-' + criteriaRowCount;
@@ -1600,6 +1683,11 @@ async function submitCandidate(){
   const cvLink = document.getElementById('f-cvlink').value.trim();
   const company = document.getElementById('f-company').value.trim();
   const linkedinUrl = document.getElementById('f-linkedin').value.trim();
+  const referred = document.getElementById('f-referred').checked;
+  const referredBy = document.getElementById('f-referred-by').value.trim();
+  const scheduleNow = document.getElementById('f-schedule-now').checked;
+  const interviewDateTime = document.getElementById('f-interview-dt').value;
+  const interviewConfirmed = document.getElementById('f-interview-confirmed').checked;
   const fileInput = document.getElementById('f-cv');
   const msgEl = document.getElementById('formMsg');
   const btn = document.getElementById('submitBtn');
@@ -1637,7 +1725,12 @@ async function submitCandidate(){
       cvLink: cvLink || null,
       source: currentSource,
       company: currentSource === 'headhunting' ? (company || null) : null,
-      linkedinUrl: currentSource === 'headhunting' ? (linkedinUrl || null) : null
+      linkedinUrl: currentSource === 'headhunting' ? (linkedinUrl || null) : null,
+      referred,
+      referredBy: referred ? (referredBy || null) : null,
+      scheduleNow: referred && scheduleNow,
+      interviewDateTime: (referred && scheduleNow && interviewDateTime) ? interviewDateTime : null,
+      interviewConfirmed: referred && scheduleNow && interviewConfirmed
     };
 
     const res = await fetch('/candidates', {
