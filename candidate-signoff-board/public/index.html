@@ -357,6 +357,7 @@
   .stage-panel .field:last-child, .stage-panel .field-row:last-child{ margin-bottom:0; }
   .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:13px; }
   .checkbox-row input{ width:auto; }
+  .interview-readout{ font-size:14px; color:var(--ink); padding:8px 0 2px; }
   .stage-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
   .back-link{
     background:none; border:none; color:var(--muted); font-size:12px; font-weight:600;
@@ -479,6 +480,7 @@ let criteriaRowCount = 0;
 let currentScore = 0;
 let currentSource = 'applied';   // 'applied' | 'headhunting' — for the Add form
 let editingId = null;            // candidate id currently open in the edit form, or null
+let editingInterviewId = null;   // candidate id whose interview date/time picker is open, or null
 const editScores = {};           // per-candidate score while editing
 const editCriteriaCount = {};    // per-candidate criteria row counter while editing
 const editSources = {};          // per-candidate source ('applied'|'headhunting') while editing
@@ -577,7 +579,7 @@ function isTypingInNoteBox(){
 }
 
 function autoRefresh(){
-  if(editingId || isTypingInNoteBox()) return;
+  if(editingId || editingInterviewId || isTypingInNoteBox()) return;
   loadCandidates();
 }
 
@@ -1149,21 +1151,40 @@ function renderStagePanel(c){
     </div>`;
 
   if(stage === 'scheduled' || stage === 'shortlisted'){
-    const dtValue = c.interviewDateTime ? c.interviewDateTime.slice(0,16) : '';
-    html += `<div class="field-row">
-      <div class="field">
-        <label for="iv-dt-${c.id}">Interview date &amp; time</label>
-        <input type="datetime-local" id="iv-dt-${c.id}" value="${escapeHtml(dtValue)}">
-      </div>
-      <div class="field" style="display:flex;align-items:flex-end;padding-bottom:9px;">
-        <label class="checkbox-row" style="margin:0;" for="iv-confirmed-${c.id}">
-          <input type="checkbox" id="iv-confirmed-${c.id}" ${c.interviewConfirmed ? 'checked' : ''}>
-          Interview confirmed
-        </label>
-      </div>
-    </div>
-    <div class="stage-actions">
-      <button class="ghost-btn" onclick="saveInterviewDetails('${c.id}')">Save interview details</button>`;
+    const isEditingInterview = editingInterviewId === c.id;
+    if(isEditingInterview){
+      const dtValue = c.interviewDateTime ? c.interviewDateTime.slice(0,16) : '';
+      html += `<div class="field-row">
+        <div class="field">
+          <label for="iv-dt-${c.id}">Interview date &amp; time</label>
+          <input type="datetime-local" id="iv-dt-${c.id}" value="${escapeHtml(dtValue)}">
+        </div>
+        <div class="field" style="display:flex;align-items:flex-end;padding-bottom:9px;">
+          <label class="checkbox-row" style="margin:0;" for="iv-confirmed-${c.id}">
+            <input type="checkbox" id="iv-confirmed-${c.id}" ${c.interviewConfirmed ? 'checked' : ''}>
+            Interview confirmed
+          </label>
+        </div>
+      </div>`;
+    }else{
+      html += `<div class="field-row">
+        <div class="field">
+          <label>Interview date &amp; time</label>
+          <div class="interview-readout">${escapeHtml(formatInterviewDateTime(c.interviewDateTime))}</div>
+        </div>
+        <div class="field">
+          <label>Confirmed</label>
+          <div class="interview-readout">${c.interviewConfirmed ? '✓ Confirmed' : 'Not confirmed yet'}</div>
+        </div>
+      </div>`;
+    }
+    html += `<div class="stage-actions">`;
+    if(isEditingInterview){
+      html += `<button class="ghost-btn" onclick="saveInterviewDetails('${c.id}')">Save interview details</button>
+        <button class="mini-cancel" onclick="toggleEditInterview('${c.id}')">Cancel</button>`;
+    }else{
+      html += `<button class="ghost-btn" onclick="toggleEditInterview('${c.id}')">${c.interviewDateTime ? 'Edit interview details' : 'Set interview date & time'}</button>`;
+    }
     if(stage === 'scheduled'){
       html += `<button class="ghost-btn" onclick="moveStage('${c.id}','shortlisted')">Move to Shortlisted</button>`;
     }
@@ -1270,6 +1291,13 @@ async function removeHold(id){
   }
 }
 
+// Resumes the 20s auto-refresh poll only once nothing is being actively edited —
+// shared by every "pause polling while this form is open" toggle below, so one
+// still-open editor can't have its in-progress edit wiped by another one closing.
+function maybeResumePoll(){
+  if(!pollTimer && !editingId && !editingInterviewId) pollTimer = setInterval(autoRefresh, 20000);
+}
+
 /* ============ Edit candidate (HR) ============ */
 function toggleEdit(id){
   editingId = (editingId === id) ? null : id;
@@ -1279,7 +1307,7 @@ function toggleEdit(id){
     delete editScores[id];
     delete editCriteriaCount[id];
     delete editSources[id];
-    if(!pollTimer) pollTimer = setInterval(autoRefresh, 20000);
+    maybeResumePoll();
   }
   renderBoard();
 }
@@ -1894,6 +1922,23 @@ async function moveStage(id, stage){
   }
 }
 
+function toggleEditInterview(id){
+  editingInterviewId = (editingInterviewId === id) ? null : id;
+  if(editingInterviewId){
+    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+  }else{
+    maybeResumePoll();
+  }
+  renderBoard();
+}
+
+function formatInterviewDateTime(iso){
+  if(!iso) return 'Not scheduled yet';
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { dateStyle:'medium', timeStyle:'short' });
+}
+
 async function saveInterviewDetails(id){
   const dtEl = document.getElementById('iv-dt-' + id);
   const confEl = document.getElementById('iv-confirmed-' + id);
@@ -1907,6 +1952,8 @@ async function saveInterviewDetails(id){
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Interview details saved');
+    editingInterviewId = null;
+    maybeResumePoll();
     loadCandidates();
   }catch(e){
     showToast('Could not save — try again');
@@ -2032,7 +2079,7 @@ async function permanentlyDelete(id){
 
 /* ============ Init ============ */
 window.addEventListener('DOMContentLoaded', loadRole);
-window.addEventListener('focus', () => { if(currentRole && !editingId && !isTypingInNoteBox()) loadCandidates(); });
+window.addEventListener('focus', () => { if(currentRole && !editingId && !editingInterviewId && !isTypingInNoteBox()) loadCandidates(); });
 </script>
 </body>
 </html>
