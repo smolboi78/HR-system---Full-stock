@@ -98,17 +98,19 @@ db.exec("UPDATE candidates SET stage = 'approved' WHERE status = 'approved' AND 
 // rejection path back then (the initial-screening one), so backfill them accordingly.
 db.exec("UPDATE candidates SET rejectionReason = 'after_second_screening' WHERE status = 'rejected' AND rejectionReason IS NULL");
 
-// Collapse every note-like field that pre-dates the shared notes history (the
-// original screening note, reviewer notes, hold note, rejection comment, and
-// scorecard summary) into notesLog, so nothing written before this feature
-// existed is lost. Only touches rows with no history yet, so it's a one-time
-// backfill per candidate, safe to run on every boot.
+// Collapse note-like fields that pre-date the shared notes history (reviewer
+// notes, hold note, rejection comment, and scorecard summary) into notesLog,
+// so nothing written before this feature existed is lost. Deliberately does
+// NOT include `notes` — that's the candidate's screening description/profile
+// (still shown on its own on the card), not a commentary-style note, and
+// folding it in here just duplicated it under a misleading "HR" note entry.
+// Only touches rows with no history yet, so it's a one-time backfill per
+// candidate, safe to run on every boot.
 const rowsNeedingNotesBackfill = db.prepare("SELECT * FROM candidates WHERE notesLog IS NULL OR notesLog = '[]'").all();
 if (rowsNeedingNotesBackfill.length) {
   const updateNotesLog = db.prepare('UPDATE candidates SET notesLog = ? WHERE id = ?');
   for (const row of rowsNeedingNotesBackfill) {
     const entries = [];
-    if (row.notes) entries.push({ author: 'HR', text: row.notes, createdAt: row.dateAdded });
     if (row.reviewNotes) entries.push({ author: 'Reviewer', text: row.reviewNotes, createdAt: row.decidedAt || row.dateAdded });
     if (row.holdNote) entries.push({ author: 'Reviewer', text: row.holdNote, createdAt: row.dateAdded });
     if (row.status === 'rejected' && row.decisionComment) {
@@ -119,6 +121,25 @@ if (rowsNeedingNotesBackfill.length) {
     if (entries.length) {
       entries.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       updateNotesLog.run(JSON.stringify(entries), row.id);
+    }
+  }
+}
+
+// One-time cleanup for the mistake above: an earlier version of this backfill
+// (now fixed) also copied `notes` into notesLog, duplicating the screening
+// description as a fake "HR" note. Strip exactly that entry — author 'HR',
+// text equal to the candidate's own `notes`, timestamp equal to their
+// dateAdded — from every candidate's history. That signature only matches
+// the erroneously auto-added entry, so this is safe to run on every boot.
+const rowsWithAnyHistory = db.prepare("SELECT id, notes, dateAdded, notesLog FROM candidates WHERE notesLog IS NOT NULL AND notesLog != '[]'").all();
+if (rowsWithAnyHistory.length) {
+  const updateNotesLog = db.prepare('UPDATE candidates SET notesLog = ? WHERE id = ?');
+  for (const row of rowsWithAnyHistory) {
+    if (!row.notes) continue;
+    const entries = JSON.parse(row.notesLog);
+    const filtered = entries.filter((n) => !(n.author === 'HR' && n.text === row.notes && n.createdAt === row.dateAdded));
+    if (filtered.length !== entries.length) {
+      updateNotesLog.run(JSON.stringify(filtered), row.id);
     }
   }
 }
@@ -282,7 +303,7 @@ app.post('/candidates', (req, res) => {
     cvHash: hashCv(cvBase64),
     referred: isReferred ? 1 : 0,
     referredBy: isReferred && referredBy ? String(referredBy) : null,
-    notesLog: JSON.stringify(trimmedNotes ? [{ author: 'HR', text: trimmedNotes, createdAt: dateAdded }] : []),
+    notesLog: '[]',
   };
 
   stmts.insert.run(row);
