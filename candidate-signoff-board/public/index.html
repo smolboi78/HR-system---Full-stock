@@ -1128,6 +1128,7 @@ function renderCard(c, ceoActions){
     ${deleteConfirmBlock}
     ${renderNotesSection(c)}
     ${editBlock}
+    ${renderMoveHistorySection(c)}
   </div>`;
 }
 
@@ -1269,7 +1270,7 @@ async function confirmHold(id){
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'pending', onHold: true, holdNote })
+      body: JSON.stringify({ status: 'pending', onHold: true, holdNote, actor: noteAuthorLabel() })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Marked on hold');
@@ -1284,7 +1285,7 @@ async function removeHold(id){
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ onHold: false, holdNote: '' })
+      body: JSON.stringify({ onHold: false, holdNote: '', actor: noteAuthorLabel() })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Hold removed');
@@ -1496,7 +1497,8 @@ async function submitEdit(id){
       company: source === 'headhunting' ? (company || null) : null,
       linkedinUrl: source === 'headhunting' ? (linkedinUrl || null) : null,
       referred,
-      referredBy: referred ? (referredBy || null) : null
+      referredBy: referred ? (referredBy || null) : null,
+      actor: noteAuthorLabel()
     };
     if(file){
       payload.cvFileName = file.name;
@@ -1573,6 +1575,32 @@ async function addNote(id){
   }catch(e){
     showToast('Could not save note — try again');
   }
+}
+
+/* ============ Shared move history (every stage transition, every role) ============ */
+const moveHistoryOpen = new Set(); // candidate ids whose move history dropdown is expanded
+
+function renderMoveHistorySection(c){
+  const history = c.moveHistory || [];
+  const isOpen = moveHistoryOpen.has(c.id);
+  let html = `<div class="notes-section move-history-section">
+    <button type="button" class="notes-toggle" onclick="toggleMoveHistory('${c.id}')">History (${history.length}) ${isOpen ? '▴' : '▾'}</button>`;
+  if(isOpen){
+    html += history.length
+      ? `<div class="notes-history">${history.slice().reverse().map(m => `
+          <div class="notes-history-item">
+            <div class="notes-history-meta"><span class="notes-author">${escapeHtml(m.by)}</span> · ${escapeHtml(formatNoteTimestamp(m.at))}</div>
+            <div class="notes-history-text">${m.from ? `${escapeHtml(m.from)} → ${escapeHtml(m.to)}` : `Added — ${escapeHtml(m.to)}`}</div>
+          </div>`).join('')}</div>`
+      : `<div class="notes-history-empty">No moves yet.</div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function toggleMoveHistory(id){
+  if(moveHistoryOpen.has(id)) moveHistoryOpen.delete(id); else moveHistoryOpen.add(id);
+  renderBoard();
 }
 
 /* ============ Add candidate (HR) ============ */
@@ -1907,7 +1935,7 @@ async function decide(id, status){
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, decisionComment: comment })
+      body: JSON.stringify({ status, decisionComment: comment, actor: noteAuthorLabel() })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast(status === 'approved' ? 'Approved' : 'Rejected');
@@ -1941,7 +1969,7 @@ async function rejectNotFitAfterMessaging(id){
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'rejected', rejectionReason: 'not_fit_after_messaging', decisionComment: comment })
+      body: JSON.stringify({ status: 'rejected', rejectionReason: 'not_fit_after_messaging', decisionComment: comment, actor: noteAuthorLabel() })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Marked not a fit — archived');
@@ -1956,7 +1984,7 @@ async function moveStage(id, stage){
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stage })
+      body: JSON.stringify({ stage, actor: noteAuthorLabel() })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     const label = { approved:'Approved for Interview', messaged:'Messaged on LinkedIn', scheduled:'Scheduled for Interview', shortlisted:'Interviewed & Shortlisted' }[stage] || stage;
@@ -1993,7 +2021,7 @@ async function saveInterviewDetails(id){
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ interviewDateTime, interviewConfirmed })
+      body: JSON.stringify({ interviewDateTime, interviewConfirmed, actor: noteAuthorLabel() })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Interview details saved');
@@ -2017,7 +2045,7 @@ async function rejectAfterInterview(id){
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'rejected', rejectionReason: 'after_interview', decisionComment: comment })
+      body: JSON.stringify({ status: 'rejected', rejectionReason: 'after_interview', decisionComment: comment, actor: noteAuthorLabel() })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Rejected after interview');
@@ -2039,6 +2067,7 @@ async function saveScorecard(id){
   const payload = {
     scoredBy: byEl ? byEl.value.trim() : '',
     scoreSummary: summaryEl ? summaryEl.value.trim() : '',
+    actor: noteAuthorLabel(),
   };
   try{
     if(file){
@@ -2081,7 +2110,7 @@ async function archiveCandidate(id){
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ archived: true })
+      body: JSON.stringify({ archived: true, actor: noteAuthorLabel() })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Archived — find it under the Archived tab');
@@ -2096,7 +2125,7 @@ async function restoreCandidate(id){
     const res = await fetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ archived: false })
+      body: JSON.stringify({ archived: false, actor: noteAuthorLabel() })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Restored');

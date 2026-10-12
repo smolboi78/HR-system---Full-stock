@@ -88,6 +88,9 @@ if (!existingColumns.includes('referredBy')) {
 if (!existingColumns.includes('notesLog')) {
   db.exec("ALTER TABLE candidates ADD COLUMN notesLog TEXT NOT NULL DEFAULT '[]'");
 }
+if (!existingColumns.includes('moveLog')) {
+  db.exec("ALTER TABLE candidates ADD COLUMN moveLog TEXT NOT NULL DEFAULT '[]'");
+}
 
 // Candidates approved before the `stage` column existed have stage=NULL, which makes
 // them fail every HR tab's `stage === 'approved'` filter — backfill them into the
@@ -144,6 +147,25 @@ if (rowsWithAnyHistory.length) {
   }
 }
 
+// Backfill a best-effort move history for candidates added before this
+// feature existed. There's no per-transition record of their past (only
+// their current state plus dateAdded/decidedAt), so this gives a synthetic
+// two-point history — "added to the board" and, if since decided, their
+// current stage — rather than every intermediate hop. Going forward every
+// real transition is logged as it happens (see the PATCH handler below).
+const rowsNeedingMoveBackfill = db.prepare("SELECT * FROM candidates WHERE moveLog IS NULL OR moveLog = '[]'").all();
+if (rowsNeedingMoveBackfill.length) {
+  const updateMoveLog = db.prepare('UPDATE candidates SET moveLog = ? WHERE id = ?');
+  for (const row of rowsNeedingMoveBackfill) {
+    const entries = [{ at: row.dateAdded, by: 'HR', from: null, to: 'Initial Screening' }];
+    if (row.status !== 'pending' || row.onHold) {
+      const author = (row.status === 'rejected' && (row.rejectionReason === 'after_interview' || row.rejectionReason === 'not_fit_after_messaging')) ? 'HR' : 'Reviewer';
+      entries.push({ at: row.decidedAt || row.dateAdded, by: author, from: 'Initial Screening', to: describeCandidateStage(row) });
+    }
+    updateMoveLog.run(JSON.stringify(entries), row.id);
+  }
+}
+
 const stmts = {
   list: db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC'),
   getById: db.prepare('SELECT * FROM candidates WHERE id = ?'),
@@ -151,9 +173,9 @@ const stmts = {
   getScorecard: db.prepare('SELECT scorecardFileName, scorecardBase64 FROM candidates WHERE id = ?'),
   insert: db.prepare(`
     INSERT INTO candidates
-      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl, archived, stage, rejectionReason, interviewDateTime, interviewConfirmed, scorecardFileName, scorecardBase64, scoreSummary, scoredBy, cvHash, referred, referredBy, notesLog)
+      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl, archived, stage, rejectionReason, interviewDateTime, interviewConfirmed, scorecardFileName, scorecardBase64, scoreSummary, scoredBy, cvHash, referred, referredBy, notesLog, moveLog)
     VALUES
-      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl, @archived, @stage, @rejectionReason, @interviewDateTime, @interviewConfirmed, @scorecardFileName, @scorecardBase64, @scoreSummary, @scoredBy, @cvHash, @referred, @referredBy, @notesLog)
+      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl, @archived, @stage, @rejectionReason, @interviewDateTime, @interviewConfirmed, @scorecardFileName, @scorecardBase64, @scoreSummary, @scoredBy, @cvHash, @referred, @referredBy, @notesLog, @moveLog)
   `),
   update: db.prepare(`
     UPDATE candidates SET
@@ -165,7 +187,7 @@ const stmts = {
       interviewDateTime = @interviewDateTime, interviewConfirmed = @interviewConfirmed,
       scorecardFileName = @scorecardFileName, scorecardBase64 = @scorecardBase64,
       scoreSummary = @scoreSummary, scoredBy = @scoredBy, cvHash = @cvHash,
-      referred = @referred, referredBy = @referredBy, notesLog = @notesLog
+      referred = @referred, referredBy = @referredBy, notesLog = @notesLog, moveLog = @moveLog
     WHERE id = @id
   `),
   remove: db.prepare('DELETE FROM candidates WHERE id = ?'),
@@ -180,6 +202,26 @@ const NOTE_AUTHORS = ['HR', 'Reviewer'];
 function hashCv(cvBase64) {
   if (!cvBase64) return null;
   return crypto.createHash('sha256').update(cvBase64).digest('hex');
+}
+
+// Human-readable label for wherever a candidate currently sits in the funnel —
+// shared by the move-history auto-logger (to describe "from X to Y") and the
+// one-time backfill below.
+function describeCandidateStage(row) {
+  if (row.archived) return 'Closed';
+  if (row.status === 'rejected') {
+    if (row.rejectionReason === 'after_interview') return 'Rejected after interview';
+    if (row.rejectionReason === 'not_fit_after_messaging') return 'Not a fit (LinkedIn)';
+    return 'Rejected after second screening';
+  }
+  if (row.status === 'pending') return row.onHold ? 'On Hold' : 'Initial Screening';
+  if (row.status === 'approved') {
+    if (row.stage === 'messaged') return 'Messaged on LinkedIn';
+    if (row.stage === 'scheduled') return 'Scheduled for Interview';
+    if (row.stage === 'shortlisted') return 'Interviewed & Shortlisted';
+    return 'Approved for Interview';
+  }
+  return row.status;
 }
 
 function rowToCandidate(row, { includeCv } = { includeCv: false }) {
@@ -217,6 +259,7 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
     referred: !!row.referred,
     referredBy: row.referredBy || '',
     notesHistory: row.notesLog ? JSON.parse(row.notesLog) : [],
+    moveHistory: row.moveLog ? JSON.parse(row.moveLog) : [],
   };
   if (includeCv) {
     candidate.cvBase64 = row.cvBase64 || null;
@@ -304,7 +347,9 @@ app.post('/candidates', (req, res) => {
     referred: isReferred ? 1 : 0,
     referredBy: isReferred && referredBy ? String(referredBy) : null,
     notesLog: '[]',
+    moveLog: '[]',
   };
+  row.moveLog = JSON.stringify([{ at: dateAdded, by: 'HR', from: null, to: describeCandidateStage(row) }]);
 
   stmts.insert.run(row);
 
@@ -319,6 +364,7 @@ app.patch('/candidates/:id', (req, res) => {
 
   const body = req.body || {};
   const next = { ...existing };
+  const actor = NOTE_AUTHORS.includes(body.actor) ? body.actor : 'HR';
 
   if (body.status !== undefined) {
     if (!STATUSES.includes(body.status)) {
@@ -440,6 +486,18 @@ app.patch('/candidates/:id', (req, res) => {
   }
   next.notesLog = JSON.stringify(notesLogArr);
 
+  // Auto-log stage transitions into the shared move history, so "where did
+  // they move and who moved them" stays derived from the same PATCH calls
+  // that already drive every stage change, rather than needing its own
+  // write path. Only logs when the computed stage label actually changes.
+  const fromLabel = describeCandidateStage(existing);
+  const toLabel = describeCandidateStage(next);
+  const moveLogArr = existing.moveLog ? JSON.parse(existing.moveLog) : [];
+  if (fromLabel !== toLabel) {
+    moveLogArr.push({ at: noteNowIso, by: actor, from: fromLabel, to: toLabel });
+  }
+  next.moveLog = JSON.stringify(moveLogArr);
+
   stmts.update.run({
     id: next.id,
     name: next.name,
@@ -472,6 +530,7 @@ app.patch('/candidates/:id', (req, res) => {
     referred: next.referred,
     referredBy: next.referredBy,
     notesLog: next.notesLog,
+    moveLog: next.moveLog,
   });
 
   const updated = stmts.getById.get(req.params.id);
