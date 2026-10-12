@@ -358,6 +358,21 @@
   .checkbox-row{ display:flex; align-items:center; gap:8px; font-size:13px; }
   .checkbox-row input{ width:auto; }
   .interview-readout{ font-size:14px; color:var(--ink); padding:8px 0 2px; }
+
+  .notes-section{ margin-top:14px; padding-top:12px; border-top:1px solid var(--surface-2); }
+  .notes-toggle{
+    background:none; border:none; padding:0; margin-bottom:8px;
+    font-size:12.5px; font-weight:700; color:var(--muted); cursor:pointer;
+  }
+  .notes-toggle:hover{ color:var(--brand); }
+  .notes-history{ margin-bottom:10px; display:flex; flex-direction:column; gap:8px; }
+  .notes-history-item{ background:var(--surface-2); border-radius:7px; padding:8px 10px; }
+  .notes-history-meta{ font-size:11px; color:var(--faint); margin-bottom:3px; }
+  .notes-author{ font-weight:700; color:var(--muted); }
+  .notes-history-text{ font-size:13px; color:var(--ink); white-space:pre-wrap; }
+  .notes-history-empty{ font-size:12.5px; color:var(--faint); margin-bottom:10px; }
+  .notes-add{ display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; }
+  .notes-add textarea{ flex:1; min-width:200px; min-height:40px; }
   .stage-actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
   .back-link{
     background:none; border:none; color:var(--muted); font-size:12px; font-weight:600;
@@ -569,8 +584,9 @@ function isTypingInNoteBox(){
   const el = document.activeElement;
   if(!el) return false;
   if(el.tagName === 'TEXTAREA'){
-    return el.id.startsWith('rn-text-') || el.id.startsWith('hn-text-') || el.id.startsWith('rev-notes-')
-      || el.id.startsWith('irn-text-') || el.id.startsWith('sc-summary-') || el.id.startsWith('nfm-text-');
+    return el.id.startsWith('rn-text-') || el.id.startsWith('hn-text-')
+      || el.id.startsWith('irn-text-') || el.id.startsWith('sc-summary-') || el.id.startsWith('nfm-text-')
+      || el.id.startsWith('note-add-text-');
   }
   if(el.tagName === 'INPUT'){
     return el.id.startsWith('iv-dt-') || el.id.startsWith('sc-by-') || el.id === 'searchInput';
@@ -1047,19 +1063,6 @@ function renderCard(c, ceoActions){
     </div>`;
   }
 
-  let reviewNotesBlock = '';
-  if(ceoActions){
-    reviewNotesBlock = `<div class="field" style="margin-top:10px;">
-      <label for="rev-notes-${c.id}">Your notes (optional)</label>
-      <textarea id="rev-notes-${c.id}" placeholder="Private notes for this candidate — not shown as a decision reason">${escapeHtml(c.reviewNotes || '')}</textarea>
-      <div class="mini-actions">
-        <button class="mini-cancel" onclick="saveReviewNotes('${c.id}')">Save note</button>
-      </div>
-    </div>`;
-  }else if(c.reviewNotes){
-    reviewNotesBlock = `<div class="decision-comment">Reviewer notes: "${escapeHtml(c.reviewNotes)}"</div>`;
-  }
-
   let deleteConfirmBlock = '';
   if(currentRole === 'hr' && c.archived){
     deleteConfirmBlock = `<div class="reject-note" id="dc-${c.id}">
@@ -1118,12 +1121,12 @@ function renderCard(c, ceoActions){
     ${criteriaHtml ? `<div class="criteria-list">${criteriaHtml}</div>` : ''}
     ${decisionComment}
     ${holdNoteDisplay}
-    ${reviewNotesBlock}
     ${stagePanel}
     ${bottom}
     ${rejectNoteBlock}
     ${holdNoteBlock}
     ${deleteConfirmBlock}
+    ${renderNotesSection(c)}
     ${editBlock}
   </div>`;
 }
@@ -1513,18 +1516,60 @@ async function submitEdit(id){
   }
 }
 
-/* ============ Reviewer notes (CEO) ============ */
-async function saveReviewNotes(id){
-  const el = document.getElementById('rev-notes-' + id);
-  const reviewNotes = el ? el.value.trim() : '';
+/* ============ Shared notes history (HR + Reviewer, every stage) ============ */
+const notesHistoryOpen = new Set(); // candidate ids whose notes history dropdown is expanded
+
+function noteAuthorLabel(){
+  return currentRole === 'ceo' ? 'Reviewer' : 'HR';
+}
+
+function formatNoteTimestamp(iso){
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { dateStyle:'medium', timeStyle:'short' });
+}
+
+function renderNotesSection(c){
+  const history = c.notesHistory || [];
+  const isOpen = notesHistoryOpen.has(c.id);
+  let html = `<div class="notes-section">
+    <button type="button" class="notes-toggle" onclick="toggleNotesHistory('${c.id}')">Notes (${history.length}) ${isOpen ? '▴' : '▾'}</button>`;
+  if(isOpen){
+    html += history.length
+      ? `<div class="notes-history">${history.slice().reverse().map(n => `
+          <div class="notes-history-item">
+            <div class="notes-history-meta"><span class="notes-author">${escapeHtml(n.author)}</span> · ${escapeHtml(formatNoteTimestamp(n.createdAt))}</div>
+            <div class="notes-history-text">${escapeHtml(n.text)}</div>
+          </div>`).join('')}</div>`
+      : `<div class="notes-history-empty">No notes yet.</div>`;
+  }
+  html += `<div class="notes-add">
+      <textarea id="note-add-text-${c.id}" placeholder="Add a note..."></textarea>
+      <button type="button" class="mini-cancel" onclick="addNote('${c.id}')">Add note</button>
+    </div>
+  </div>`;
+  return html;
+}
+
+function toggleNotesHistory(id){
+  if(notesHistoryOpen.has(id)) notesHistoryOpen.delete(id); else notesHistoryOpen.add(id);
+  renderBoard();
+}
+
+async function addNote(id){
+  const el = document.getElementById('note-add-text-' + id);
+  const text = el ? el.value.trim() : '';
+  if(!text){ showToast('Write something first'); return; }
   try{
-    const res = await fetch('/candidates/' + id, {
-      method: 'PATCH',
+    const res = await fetch('/candidates/' + id + '/notes', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reviewNotes })
+      body: JSON.stringify({ author: noteAuthorLabel(), text })
     });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
-    showToast('Note saved');
+    showToast('Note added');
+    notesHistoryOpen.add(id);
+    loadCandidates();
   }catch(e){
     showToast('Could not save note — try again');
   }

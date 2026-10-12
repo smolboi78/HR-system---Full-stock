@@ -85,6 +85,9 @@ if (!existingColumns.includes('referred')) {
 if (!existingColumns.includes('referredBy')) {
   db.exec('ALTER TABLE candidates ADD COLUMN referredBy TEXT');
 }
+if (!existingColumns.includes('notesLog')) {
+  db.exec("ALTER TABLE candidates ADD COLUMN notesLog TEXT NOT NULL DEFAULT '[]'");
+}
 
 // Candidates approved before the `stage` column existed have stage=NULL, which makes
 // them fail every HR tab's `stage === 'approved'` filter — backfill them into the
@@ -95,6 +98,31 @@ db.exec("UPDATE candidates SET stage = 'approved' WHERE status = 'approved' AND 
 // rejection path back then (the initial-screening one), so backfill them accordingly.
 db.exec("UPDATE candidates SET rejectionReason = 'after_second_screening' WHERE status = 'rejected' AND rejectionReason IS NULL");
 
+// Collapse every note-like field that pre-dates the shared notes history (the
+// original screening note, reviewer notes, hold note, rejection comment, and
+// scorecard summary) into notesLog, so nothing written before this feature
+// existed is lost. Only touches rows with no history yet, so it's a one-time
+// backfill per candidate, safe to run on every boot.
+const rowsNeedingNotesBackfill = db.prepare("SELECT * FROM candidates WHERE notesLog IS NULL OR notesLog = '[]'").all();
+if (rowsNeedingNotesBackfill.length) {
+  const updateNotesLog = db.prepare('UPDATE candidates SET notesLog = ? WHERE id = ?');
+  for (const row of rowsNeedingNotesBackfill) {
+    const entries = [];
+    if (row.notes) entries.push({ author: 'HR', text: row.notes, createdAt: row.dateAdded });
+    if (row.reviewNotes) entries.push({ author: 'Reviewer', text: row.reviewNotes, createdAt: row.decidedAt || row.dateAdded });
+    if (row.holdNote) entries.push({ author: 'Reviewer', text: row.holdNote, createdAt: row.dateAdded });
+    if (row.status === 'rejected' && row.decisionComment) {
+      const author = (row.rejectionReason === 'after_interview' || row.rejectionReason === 'not_fit_after_messaging') ? 'HR' : 'Reviewer';
+      entries.push({ author, text: row.decisionComment, createdAt: row.decidedAt || row.dateAdded });
+    }
+    if (row.scoreSummary) entries.push({ author: 'HR', text: row.scoreSummary, createdAt: row.dateAdded });
+    if (entries.length) {
+      entries.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      updateNotesLog.run(JSON.stringify(entries), row.id);
+    }
+  }
+}
+
 const stmts = {
   list: db.prepare('SELECT * FROM candidates ORDER BY dateAdded ASC'),
   getById: db.prepare('SELECT * FROM candidates WHERE id = ?'),
@@ -102,9 +130,9 @@ const stmts = {
   getScorecard: db.prepare('SELECT scorecardFileName, scorecardBase64 FROM candidates WHERE id = ?'),
   insert: db.prepare(`
     INSERT INTO candidates
-      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl, archived, stage, rejectionReason, interviewDateTime, interviewConfirmed, scorecardFileName, scorecardBase64, scoreSummary, scoredBy, cvHash, referred, referredBy)
+      (id, name, role, dateAdded, notes, score, criteria, status, cvFileName, cvBase64, cvLink, decidedAt, decisionComment, reviewNotes, onHold, holdNote, source, company, linkedinUrl, archived, stage, rejectionReason, interviewDateTime, interviewConfirmed, scorecardFileName, scorecardBase64, scoreSummary, scoredBy, cvHash, referred, referredBy, notesLog)
     VALUES
-      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl, @archived, @stage, @rejectionReason, @interviewDateTime, @interviewConfirmed, @scorecardFileName, @scorecardBase64, @scoreSummary, @scoredBy, @cvHash, @referred, @referredBy)
+      (@id, @name, @role, @dateAdded, @notes, @score, @criteria, @status, @cvFileName, @cvBase64, @cvLink, @decidedAt, @decisionComment, @reviewNotes, @onHold, @holdNote, @source, @company, @linkedinUrl, @archived, @stage, @rejectionReason, @interviewDateTime, @interviewConfirmed, @scorecardFileName, @scorecardBase64, @scoreSummary, @scoredBy, @cvHash, @referred, @referredBy, @notesLog)
   `),
   update: db.prepare(`
     UPDATE candidates SET
@@ -116,7 +144,7 @@ const stmts = {
       interviewDateTime = @interviewDateTime, interviewConfirmed = @interviewConfirmed,
       scorecardFileName = @scorecardFileName, scorecardBase64 = @scorecardBase64,
       scoreSummary = @scoreSummary, scoredBy = @scoredBy, cvHash = @cvHash,
-      referred = @referred, referredBy = @referredBy
+      referred = @referred, referredBy = @referredBy, notesLog = @notesLog
     WHERE id = @id
   `),
   remove: db.prepare('DELETE FROM candidates WHERE id = ?'),
@@ -126,6 +154,7 @@ const STATUSES = ['pending', 'approved', 'rejected'];
 const SOURCES = ['applied', 'headhunting'];
 const STAGES = ['approved', 'messaged', 'scheduled', 'shortlisted'];
 const REJECTION_REASONS = ['after_second_screening', 'after_interview', 'not_fit_after_messaging'];
+const NOTE_AUTHORS = ['HR', 'Reviewer'];
 
 function hashCv(cvBase64) {
   if (!cvBase64) return null;
@@ -166,6 +195,7 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
     scoredBy: row.scoredBy || '',
     referred: !!row.referred,
     referredBy: row.referredBy || '',
+    notesHistory: row.notesLog ? JSON.parse(row.notesLog) : [],
   };
   if (includeCv) {
     candidate.cvBase64 = row.cvBase64 || null;
@@ -217,19 +247,22 @@ app.post('/candidates', (req, res) => {
   const isReferred = !!referred || !!scheduleNow;
   const fastTrack = !!scheduleNow;
 
+  const dateAdded = new Date().toISOString();
+  const trimmedNotes = notes ? String(notes).trim() : '';
+
   const row = {
     id: crypto.randomUUID(),
     name: String(name).trim(),
     role: String(role).trim(),
-    dateAdded: new Date().toISOString(),
-    notes: notes ? String(notes) : null,
+    dateAdded,
+    notes: trimmedNotes || null,
     score: Number.isInteger(score) ? score : null,
     criteria: JSON.stringify(Array.isArray(criteria) ? criteria : []),
     status: fastTrack ? 'approved' : 'pending',
     cvFileName: cvFileName || null,
     cvBase64: cvBase64 || null,
     cvLink: cvLink || null,
-    decidedAt: fastTrack ? new Date().toISOString() : null,
+    decidedAt: fastTrack ? dateAdded : null,
     decisionComment: fastTrack ? 'Referral — added directly to Scheduled for Interview' : null,
     reviewNotes: null,
     onHold: 0,
@@ -249,6 +282,7 @@ app.post('/candidates', (req, res) => {
     cvHash: hashCv(cvBase64),
     referred: isReferred ? 1 : 0,
     referredBy: isReferred && referredBy ? String(referredBy) : null,
+    notesLog: JSON.stringify(trimmedNotes ? [{ author: 'HR', text: trimmedNotes, createdAt: dateAdded }] : []),
   };
 
   stmts.insert.run(row);
@@ -363,6 +397,28 @@ app.patch('/candidates/:id', (req, res) => {
   if (body.referred !== undefined) next.referred = body.referred ? 1 : 0;
   if (body.referredBy !== undefined) next.referredBy = body.referredBy ? String(body.referredBy) : null;
 
+  // Auto-log structured notes (hold reason, rejection reason, scorecard summary,
+  // reviewer notes) into the shared notes history as they're written, so the
+  // history stays the one complete record without each call site needing to
+  // know about it. Only logs on an actual change, so re-saving unchanged text
+  // doesn't spam duplicate entries.
+  const notesLogArr = existing.notesLog ? JSON.parse(existing.notesLog) : [];
+  const noteNowIso = new Date().toISOString();
+  if (body.holdNote !== undefined && body.holdNote && body.holdNote !== existing.holdNote) {
+    notesLogArr.push({ author: 'Reviewer', text: String(body.holdNote), createdAt: noteNowIso });
+  }
+  if (body.status === 'rejected' && body.decisionComment) {
+    const author = (next.rejectionReason === 'after_interview' || next.rejectionReason === 'not_fit_after_messaging') ? 'HR' : 'Reviewer';
+    notesLogArr.push({ author, text: String(body.decisionComment), createdAt: noteNowIso });
+  }
+  if (body.scoreSummary !== undefined && body.scoreSummary && body.scoreSummary !== existing.scoreSummary) {
+    notesLogArr.push({ author: 'HR', text: String(body.scoreSummary), createdAt: noteNowIso });
+  }
+  if (body.reviewNotes !== undefined && body.reviewNotes && body.reviewNotes !== existing.reviewNotes) {
+    notesLogArr.push({ author: 'Reviewer', text: String(body.reviewNotes), createdAt: noteNowIso });
+  }
+  next.notesLog = JSON.stringify(notesLogArr);
+
   stmts.update.run({
     id: next.id,
     name: next.name,
@@ -394,7 +450,30 @@ app.patch('/candidates/:id', (req, res) => {
     cvHash: next.cvHash,
     referred: next.referred,
     referredBy: next.referredBy,
+    notesLog: next.notesLog,
   });
+
+  const updated = stmts.getById.get(req.params.id);
+  res.json(rowToCandidate(updated));
+});
+
+app.post('/candidates/:id/notes', (req, res) => {
+  const existing = stmts.getById.get(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ error: 'Candidate not found' });
+  }
+
+  const { author, text } = req.body || {};
+  if (!NOTE_AUTHORS.includes(author)) {
+    return res.status(400).json({ error: `author must be one of ${NOTE_AUTHORS.join(', ')}` });
+  }
+  if (!text || !String(text).trim()) {
+    return res.status(400).json({ error: 'Note text is required.' });
+  }
+
+  const log = existing.notesLog ? JSON.parse(existing.notesLog) : [];
+  log.push({ author, text: String(text).trim(), createdAt: new Date().toISOString() });
+  db.prepare('UPDATE candidates SET notesLog = ? WHERE id = ?').run(JSON.stringify(log), req.params.id);
 
   const updated = stmts.getById.get(req.params.id);
   res.json(rowToCandidate(updated));
