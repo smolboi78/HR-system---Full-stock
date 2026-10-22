@@ -6,6 +6,10 @@ const { DatabaseSync } = require('node:sqlite');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'candidates.db');
+// Shared secret gating every /candidates route — set in Railway's Variables tab,
+// never hardcoded or committed. If it's unset, the API refuses all requests
+// rather than silently running open.
+const ACCESS_KEY = process.env.BOARD_ACCESS_KEY || '';
 
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new DatabaseSync(DB_PATH);
@@ -272,6 +276,24 @@ app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+// Gate every /candidates route (listing, CVs, scorecards, create/update/delete)
+// behind a shared key sent as the x-access-key header. Compared with a
+// constant-time check so response timing can't leak how much of the key
+// a guess got right.
+function requireAccessKey(req, res, next) {
+  if (!ACCESS_KEY) {
+    return res.status(401).json({ error: 'Server has no access key configured.' });
+  }
+  const provided = Buffer.from(req.get('x-access-key') || '');
+  const expected = Buffer.from(ACCESS_KEY);
+  const valid = provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  if (!valid) {
+    return res.status(401).json({ error: 'Missing or invalid access key.' });
+  }
+  next();
+}
+app.use('/candidates', requireAccessKey);
 
 app.get('/candidates', (req, res) => {
   const rows = stmts.list.all();

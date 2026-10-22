@@ -33,5 +33,18 @@ See the deployment steps in the project chat/README, or:
    directory** to `candidate-signoff-board` if it's a subfolder of a bigger repo.
 3. Add a **Volume** mounted at `/app/data` so the SQLite file survives restarts/deploys.
 4. Set the env var `DB_PATH=/app/data/candidates.db`.
-5. Deploy — Railway auto-detects Node via Nixpacks and runs `npm start`.
-6. Generate a public domain under Settings → Networking → Generate Domain.
+5. Set the env var `BOARD_ACCESS_KEY` to a long random string — this gates every
+   `/candidates` route (see "Access control" below). Without it, the API refuses
+   all requests.
+6. Deploy — Railway auto-detects Node via Nixpacks and runs `npm start`.
+7. Generate a public domain under Settings → Networking → Generate Domain.
+
+## Access control
+
+Every `/candidates` route (listing, CVs, scorecards, create/update/delete) requires
+an `x-access-key` header matching the `BOARD_ACCESS_KEY` env var, or it returns 401.
+`/health` and the static frontend are not gated, so the page itself always loads —
+it's the key screen in the UI that prompts for the key before calling the API, and
+stores it in the browser's `localStorage` so it only has to be entered once per
+device. The key is never hardcoded or committed — set it only in Railway's
+Variables tab (or a local `.env`, which is gitignored).

@@ -79,10 +79,13 @@
   }
 
   /* ---------- Role picker overlay ---------- */
-  #rolePicker{
+  #rolePicker, #accessKeyScreen{
     position:fixed; inset:0; background:var(--bg); z-index:100;
     display:flex; align-items:center; justify-content:center; padding:24px;
   }
+  .key-form{ display:flex; flex-direction:column; gap:12px; }
+  .key-error{ color:var(--reject); font-size:13px; text-align:left; display:none; }
+  .key-error.show{ display:block; }
   .picker-card{ max-width:460px; width:100%; text-align:center; }
   .stamp-mark{
     width:64px; height:64px; margin:0 auto 20px; border-radius:50%;
@@ -218,7 +221,7 @@
   .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
   @media(max-width:560px){ .field-row{ grid-template-columns:1fr; } }
   label{ display:block; font-size:12px; font-weight:600; color:var(--muted); margin-bottom:5px; text-transform:uppercase; letter-spacing:0.03em; }
-  input[type=text], input[type=file], textarea, select{
+  input[type=text], input[type=password], input[type=file], textarea, select{
     width:100%; border:1px solid var(--line-strong); border-radius:8px; padding:9px 11px;
     font-size:14px; background:#fff; color:var(--ink);
   }
@@ -449,6 +452,21 @@
 </head>
 <body>
 
+<div id="accessKeyScreen" style="display:none;">
+  <div class="picker-card">
+    <div class="stamp-mark">🔒</div>
+    <h2>Candidate Sign-Off Board</h2>
+    <p>Enter the shared access key to continue. This is only asked once per device.</p>
+    <form class="key-form" onsubmit="return submitAccessKey(event)">
+      <input type="password" id="accessKeyInput" placeholder="Access key" autocomplete="off" autofocus>
+      <div class="key-error" id="accessKeyError">That key was rejected — check it and try again.</div>
+      <button type="submit" class="picker-btn" id="accessKeySubmitBtn" style="justify-content:center;">
+        <strong>Continue</strong>
+      </button>
+    </form>
+  </div>
+</div>
+
 <div id="rolePicker">
   <div class="picker-card">
     <div class="stamp-mark">✓</div>
@@ -545,6 +563,75 @@ function showToast(msg){
   setTimeout(()=>t.classList.remove('show'), 2400);
 }
 
+/* ============ Access key handling ============ */
+const ACCESS_KEY_STORAGE = 'csb-access-key';
+
+function getAccessKey(){
+  try{ return localStorage.getItem(ACCESS_KEY_STORAGE) || ''; }catch(e){ return ''; }
+}
+function setAccessKey(key){
+  try{ localStorage.setItem(ACCESS_KEY_STORAGE, key); }catch(e){ /* ignore, still proceed */ }
+}
+function clearAccessKey(){
+  try{ localStorage.removeItem(ACCESS_KEY_STORAGE); }catch(e){ /* ignore */ }
+}
+
+function boot(){
+  if(getAccessKey()){
+    document.getElementById('accessKeyScreen').style.display = 'none';
+    loadRole();
+  } else {
+    document.getElementById('accessKeyScreen').style.display = 'flex';
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('rolePicker').style.display = 'none';
+  }
+}
+
+// Every API call to /candidates goes through here so the access key header
+// and the "key was rejected" recovery path live in exactly one place.
+async function apiFetch(url, options){
+  const opts = Object.assign({}, options);
+  opts.headers = Object.assign({}, opts.headers, { 'x-access-key': getAccessKey() });
+  const res = await fetch(url, opts);
+  if(res.status === 401){
+    clearAccessKey();
+    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('rolePicker').style.display = 'none';
+    document.getElementById('accessKeyScreen').style.display = 'flex';
+    document.getElementById('accessKeyError').textContent = 'That key was rejected — check it and try again.';
+    document.getElementById('accessKeyError').classList.add('show');
+  }
+  return res;
+}
+
+async function submitAccessKey(e){
+  if(e) e.preventDefault();
+  const el = document.getElementById('accessKeyInput');
+  const key = el ? el.value.trim() : '';
+  if(!key) return false;
+  setAccessKey(key);
+  const btn = document.getElementById('accessKeySubmitBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Checking…'; }
+  try{
+    // Validate against the server right away — don't move past this screen
+    // on a key that's actually wrong (apiFetch's own 401 handling re-shows
+    // this screen with the error if it is).
+    const res = await apiFetch('/candidates');
+    if(res.status === 401) return false;
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    document.getElementById('accessKeyError').classList.remove('show');
+    document.getElementById('accessKeyScreen').style.display = 'none';
+    loadRole();
+  }catch(err){
+    document.getElementById('accessKeyError').textContent = 'Could not reach the server — try again.';
+    document.getElementById('accessKeyError').classList.add('show');
+  }finally{
+    if(btn){ btn.disabled = false; btn.innerHTML = '<strong>Continue</strong>'; }
+  }
+  return false;
+}
+
 /* ============ Role handling ============ */
 function loadRole(){
   const stored = localStorage.getItem('csb-ui-role');
@@ -602,7 +689,7 @@ function autoRefresh(){
 /* ============ Loading candidates ============ */
 async function loadCandidates(isManual){
   try{
-    const res = await fetch('/candidates');
+    const res = await apiFetch('/candidates');
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     const data = await res.json();
     data.sort((a,b) => new Date(a.dateAdded) - new Date(b.dateAdded));
@@ -1267,7 +1354,7 @@ async function confirmHold(id){
     // status: 'pending' is a no-op for an already-pending candidate (the normal
     // screening hold flow), but is what moves a previously-approved candidate
     // back to pending + on hold when the CEO reconsiders an approval.
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'pending', onHold: true, holdNote, actor: noteAuthorLabel() })
@@ -1282,7 +1369,7 @@ async function confirmHold(id){
 
 async function removeHold(id){
   try{
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ onHold: false, holdNote: '', actor: noteAuthorLabel() })
@@ -1504,7 +1591,7 @@ async function submitEdit(id){
       payload.cvFileName = file.name;
       payload.cvBase64 = await fileToBase64(file);
     }
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -1563,7 +1650,7 @@ async function addNote(id){
   const text = el ? el.value.trim() : '';
   if(!text){ showToast('Write something first'); return; }
   try{
-    const res = await fetch('/candidates/' + id + '/notes', {
+    const res = await apiFetch('/candidates/' + id + '/notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ author: noteAuthorLabel(), text })
@@ -1834,7 +1921,7 @@ async function submitCandidate(){
       interviewConfirmed: referred && scheduleNow && interviewConfirmed
     };
 
-    const res = await fetch('/candidates', {
+    const res = await apiFetch('/candidates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -1908,7 +1995,7 @@ async function checkDuplicateCv(input){
 /* ============ CV viewing ============ */
 async function viewCv(id){
   try{
-    const res = await fetch('/candidates/' + id + '/cv');
+    const res = await apiFetch('/candidates/' + id + '/cv');
     if(!res.ok){ showToast('CV not found'); return; }
     const data = await res.json();
     if(!data || !data.cvBase64){ showToast('CV not found'); return; }
@@ -1932,7 +2019,7 @@ async function decide(id, status){
     comment = el ? el.value.trim() : '';
   }
   try{
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, decisionComment: comment, actor: noteAuthorLabel() })
@@ -1966,7 +2053,7 @@ async function rejectNotFitAfterMessaging(id){
   const el = document.getElementById('nfm-text-' + id);
   const comment = el ? el.value.trim() : '';
   try{
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'rejected', rejectionReason: 'not_fit_after_messaging', decisionComment: comment, actor: noteAuthorLabel() })
@@ -1981,7 +2068,7 @@ async function rejectNotFitAfterMessaging(id){
 
 async function moveStage(id, stage){
   try{
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ stage, actor: noteAuthorLabel() })
@@ -2018,7 +2105,7 @@ async function saveInterviewDetails(id){
   const interviewDateTime = dtEl && dtEl.value ? dtEl.value : null;
   const interviewConfirmed = confEl ? confEl.checked : false;
   try{
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ interviewDateTime, interviewConfirmed, actor: noteAuthorLabel() })
@@ -2042,7 +2129,7 @@ async function rejectAfterInterview(id){
   const el = document.getElementById('irn-text-' + id);
   const comment = el ? el.value.trim() : '';
   try{
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'rejected', rejectionReason: 'after_interview', decisionComment: comment, actor: noteAuthorLabel() })
@@ -2074,7 +2161,7 @@ async function saveScorecard(id){
       payload.scorecardFileName = file.name;
       payload.scorecardBase64 = await fileToBase64(file);
     }
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -2089,7 +2176,7 @@ async function saveScorecard(id){
 
 async function viewScorecard(id){
   try{
-    const res = await fetch('/candidates/' + id + '/scorecard');
+    const res = await apiFetch('/candidates/' + id + '/scorecard');
     if(!res.ok){ showToast('Scorecard not found'); return; }
     const data = await res.json();
     if(!data || !data.scorecardBase64){ showToast('Scorecard not found'); return; }
@@ -2107,7 +2194,7 @@ async function viewScorecard(id){
 
 async function archiveCandidate(id){
   try{
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ archived: true, actor: noteAuthorLabel() })
@@ -2122,7 +2209,7 @@ async function archiveCandidate(id){
 
 async function restoreCandidate(id){
   try{
-    const res = await fetch('/candidates/' + id, {
+    const res = await apiFetch('/candidates/' + id, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ archived: false, actor: noteAuthorLabel() })
@@ -2142,7 +2229,7 @@ function toggleDeleteConfirm(id){
 
 async function permanentlyDelete(id){
   try{
-    const res = await fetch('/candidates/' + id, { method: 'DELETE' });
+    const res = await apiFetch('/candidates/' + id, { method: 'DELETE' });
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Deleted permanently');
     loadCandidates();
@@ -2152,7 +2239,7 @@ async function permanentlyDelete(id){
 }
 
 /* ============ Init ============ */
-window.addEventListener('DOMContentLoaded', loadRole);
+window.addEventListener('DOMContentLoaded', boot);
 window.addEventListener('focus', () => { if(currentRole && !editingId && !editingInterviewId && !isTypingInNoteBox()) loadCandidates(); });
 </script>
 </body>
