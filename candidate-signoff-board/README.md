@@ -48,3 +48,7 @@ it's the key screen in the UI that prompts for the key before calling the API, a
 stores it in the browser's `localStorage` so it only has to be entered once per
 device. The key is never hardcoded or committed — set it only in Railway's
 Variables tab (or a local `.env`, which is gitignored).
+
+Setting or changing `BOARD_ACCESS_KEY` in Railway's Variables tab does not take
+effect on its own — the running container only reads env vars at startup, so the
+service needs a redeploy/restart afterward to actually pick up the new value.
