@@ -467,7 +467,7 @@
   </div>
 </div>
 
-<div id="rolePicker">
+<div id="rolePicker" style="display:none;">
   <div class="picker-card">
     <div class="stamp-mark">✓</div>
     <h2>Candidate Sign-Off Board</h2>
@@ -599,7 +599,14 @@ async function apiFetch(url, options){
     document.getElementById('app').style.display = 'none';
     document.getElementById('rolePicker').style.display = 'none';
     document.getElementById('accessKeyScreen').style.display = 'flex';
-    document.getElementById('accessKeyError').textContent = 'That key was rejected — check it and try again.';
+    // Surface the server's actual reason (e.g. "no access key configured" vs
+    // "wrong key") rather than always blaming the key the user typed.
+    let message = 'That key was rejected — check it and try again.';
+    try{
+      const body = await res.clone().json();
+      if(body && body.error) message = body.error;
+    }catch(e){ /* non-JSON body, keep the default message */ }
+    document.getElementById('accessKeyError').textContent = message;
     document.getElementById('accessKeyError').classList.add('show');
   }
   return res;
