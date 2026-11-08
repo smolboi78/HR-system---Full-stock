@@ -1316,6 +1316,7 @@ function renderStagePanel(c){
     <div class="stage-actions">
       <button class="ghost-btn" onclick="saveScorecard('${c.id}')">Save scorecard</button>
       ${c.hasScorecard ? `<button class="handled-btn" onclick="viewScorecard('${c.id}')">📎 View scorecard</button>` : ''}
+      <button class="ghost-btn" onclick="hireCandidate('${c.id}')">Hired</button>
     </div>`;
   }
 
@@ -2211,6 +2212,22 @@ async function archiveCandidate(id){
     loadCandidates();
   }catch(e){
     showToast('Could not archive this entry — try again');
+  }
+}
+
+async function hireCandidate(id){
+  if(!confirm('Mark as hired? This moves them into Onboarding and archives this card here.')) return;
+  try{
+    const res = await apiFetch('/candidates/' + id + '/hire', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actor: noteAuthorLabel() })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Moved to Onboarding, under Awaiting signed offer');
+    loadCandidates();
+  }catch(e){
+    showToast('Could not move this candidate to Onboarding — try again');
   }
 }
 
