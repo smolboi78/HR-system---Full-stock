@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fullstock HR: Home</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+
+<header class="topbar">
+  <img class="logo" src="img/fullstock-logo.png" alt="Fullstock">
+  <span style="font-size:18px;font-weight:700;">HR</span>
+  <nav aria-label="Main">
+    <a href="onboarding.html">Onboarding</a>
+    <a href="templates.html">Templates</a>
+  </nav>
+  <div class="who">
+    <span id="whoLabel">&nbsp;</span>
+    <a href="#" id="logoutLink">Log out</a>
+  </div>
+</header>
+
+<main>
+  <h1 id="greeting">Good morning</h1>
+  <p class="sub" id="todayLine">&nbsp;</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:24px;margin-top:36px;">
+    <a href="index.html" class="card" style="display:flex;flex-direction:column;gap:14px;padding:32px;text-decoration:none;color:var(--ink);">
+      <span style="font-size:14px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--link);">Before hire</span>
+      <span style="font-size:32px;font-weight:700;">Recruitment</span>
+      <span style="font-size:17px;color:var(--muted);">The candidate sign-off board, exactly as it is today.</span>
+      <div style="display:flex;gap:28px;margin-top:8px;">
+        <div style="display:flex;flex-direction:column;">
+          <span id="rcWaiting" style="font-size:34px;font-weight:700;">—</span>
+          <span style="font-size:14px;color:var(--muted);">Waiting for review</span>
+        </div>
+        <div style="display:flex;flex-direction:column;">
+          <span id="rcShortlisted" style="font-size:34px;font-weight:700;">—</span>
+          <span style="font-size:14px;color:var(--muted);">Shortlisted</span>
+        </div>
+      </div>
+      <span style="margin-top:auto;font-size:16px;font-weight:700;color:var(--link);">Open Recruitment →</span>
+    </a>
+
+    <a href="onboarding.html" class="card" style="display:flex;flex-direction:column;gap:14px;padding:32px;border-top:6px solid var(--brand);text-decoration:none;color:var(--ink);">
+      <span style="font-size:14px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--link);">After hire</span>
+      <span style="font-size:32px;font-weight:700;">Onboarding</span>
+      <span style="font-size:17px;color:var(--muted);">Every new hire's checklist, from signed offer to probation decision.</span>
+      <div style="display:flex;gap:28px;margin-top:8px;">
+        <div style="display:flex;flex-direction:column;">
+          <span id="obActive" style="font-size:34px;font-weight:700;">—</span>
+          <span style="font-size:14px;color:var(--muted);">Active hire</span>
+        </div>
+        <div style="display:flex;flex-direction:column;">
+          <span id="obOverdue" style="font-size:34px;font-weight:700;color:var(--overdue-fg);">—</span>
+          <span style="font-size:14px;color:var(--muted);">Overdue item</span>
+        </div>
+        <div style="display:flex;flex-direction:column;">
+          <span id="obAwaiting" style="font-size:34px;font-weight:700;">—</span>
+          <span style="font-size:14px;color:var(--muted);">Awaiting signed offer</span>
+        </div>
+      </div>
+      <span style="margin-top:auto;font-size:16px;font-weight:700;color:var(--link);">Open Onboarding →</span>
+    </a>
+  </div>
+
+  <p class="sub" style="margin-top:32px;">Nesma and the CEO see everything. Only Nesma can edit Onboarding.</p>
+</main>
+
+<script src="shared.js"></script>
+<script>
+function pluralize(n, word){ return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+async function boot(){
+  if(!requireAccessKeyOrRedirect()) return;
+
+  const who = currentUserLabel();
+  document.getElementById('whoLabel').textContent = who;
+  document.getElementById('greeting').textContent = 'Good morning' + (who.startsWith('Nesma') ? ', Nesma' : '');
+  const now = new Date();
+  const weekday = now.toLocaleDateString('en-US', { weekday: 'long' });
+  const month = now.toLocaleDateString('en-US', { month: 'long' });
+  document.getElementById('todayLine').textContent =
+    weekday + ', ' + now.getDate() + ' ' + month + ' ' + now.getFullYear() + '. Here\'s where things stand.';
+
+  try{
+    const res = await apiFetch('/candidates');
+    if(res.ok){
+      const candidates = await res.json();
+      const waiting = candidates.filter(c => c.status === 'pending' && !c.onHold).length;
+      const shortlisted = candidates.filter(c => c.status === 'approved' && c.stage === 'shortlisted' && !c.archived).length;
+      document.getElementById('rcWaiting').textContent = waiting;
+      document.getElementById('rcShortlisted').textContent = shortlisted;
+    }
+  }catch(e){ /* tile just keeps showing — */ }
+
+  try{
+    const res = await apiFetch('/hires');
+    if(res.ok){
+      const hires = await res.json();
+      const active = hires.filter(h => h.phase === 'active' && !h.archived).length;
+      const awaiting = hires.filter(h => h.phase === 'awaiting_offer' && !h.archived).length;
+      const overdue = hires.filter(h => !h.archived).reduce((sum, h) => sum + h.checklist.overdue, 0);
+      document.getElementById('obActive').textContent = active;
+      document.getElementById('obOverdue').textContent = overdue;
+      document.getElementById('obAwaiting').textContent = awaiting;
+    }
+  }catch(e){ /* — */ }
+}
+
+document.getElementById('logoutLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  clearAccessKey();
+  window.location.href = 'index.html';
+});
+
+boot();
+</script>
+</body>
+</html>
