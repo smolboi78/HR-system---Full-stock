@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fullstock HR: Onboarding</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+.section{display:flex;flex-direction:column;gap:12px;margin-bottom:28px;}
+.week-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 0;border-top:1px solid #E1F3FA;text-decoration:none;color:var(--ink);}
+.week-row:first-child{border-top:0;}
+.grid-cards{display:grid;grid-template-columns:repeat(auto-fill, minmax(340px, 1fr));gap:18px;}
+.awaiting-card{background:#FFFFFF;border:1px dashed var(--border-strong);border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:10px;}
+.hire-card{background:#FFFFFF;border:1px solid var(--border);border-top:6px solid var(--brand);border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:12px;text-decoration:none;color:var(--ink);}
+.avatar{width:46px;height:46px;border-radius:50%;background:var(--active-bg);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;color:var(--link);flex:none;}
+.progress-track{height:10px;background:var(--active-bg);border-radius:999px;overflow:hidden;}
+.progress-fill{height:100%;background:var(--brand);}
+.empty-note{padding:22px;border:1px dashed var(--border);border-radius:14px;font-size:16px;color:var(--muted);background:#fff;}
+
+.modal-backdrop{position:fixed;inset:0;background:rgba(26,26,26,0.45);display:none;align-items:center;justify-content:center;padding:20px;z-index:100;}
+.modal-backdrop.show{display:flex;}
+.modal-card{width:100%;max-width:460px;background:#fff;border-top:6px solid var(--brand);border-radius:14px;padding:28px 30px;display:flex;flex-direction:column;gap:16px;}
+.modal-card label{display:flex;flex-direction:column;gap:6px;font-size:15px;font-weight:700;}
+.modal-card input,.modal-card select{font-size:16px;padding:11px 14px;border:1px solid var(--border-strong);border-radius:8px;}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <img class="logo" src="img/fullstock-logo.png" alt="Fullstock">
+  <nav aria-label="Main">
+    <a href="home.html">Home</a>
+    <a href="index.html">Recruitment</a>
+    <a href="onboarding.html" class="active" aria-current="page">Onboarding</a>
+  </nav>
+  <div class="who">
+    <span id="whoLabel">&nbsp;</span>
+    <a href="#" id="logoutLink">Log out</a>
+  </div>
+</header>
+
+<main>
+  <h1>Onboarding</h1>
+  <p class="sub">From signed offer to probation decision.</p>
+
+  <section class="section card" style="padding:22px 24px;margin-top:28px;">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:12px;">
+      <h2>This week</h2>
+      <span id="weekRange" style="font-size:15px;color:var(--muted);"></span>
+    </div>
+    <div id="weekList"></div>
+  </section>
+
+  <section class="section">
+    <h2>Awaiting signed offer <span id="awaitingCount" style="font-size:16px;font-weight:400;color:var(--muted);"></span></h2>
+    <div class="grid-cards" id="awaitingCards"></div>
+  </section>
+
+  <section class="section">
+    <h2>Active hires <span id="activeCount" style="font-size:16px;font-weight:400;color:var(--muted);"></span></h2>
+    <div class="grid-cards" id="activeCards"></div>
+  </section>
+
+  <section class="section">
+    <h2>Done <span id="doneCount" style="font-size:16px;font-weight:400;color:var(--muted);"></span></h2>
+    <div id="doneArea"></div>
+  </section>
+</main>
+
+<div class="modal-backdrop" id="offerModal">
+  <div class="modal-card">
+    <div>
+      <h1 style="font-size:28px;margin:0 0 4px;">Offer signed</h1>
+      <p class="sub" id="offerModalWho"></p>
+    </div>
+    <label>Start date
+      <input type="date" id="offerStartDate">
+    </label>
+    <label>Direct manager
+      <select id="offerManager">
+        <option value="">Choose the manager</option>
+      </select>
+    </label>
+    <label>Day 1 arrival time
+      <input type="time" id="offerArrival" value="10:30">
+    </label>
+    <p style="margin:0;font-size:15px;padding:12px 14px;background:var(--active-bg);border-radius:8px;">This starts the checklist. Every due date is worked out from the start date, and the KPI plan request to the manager is ready to send.</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button type="button" class="btn secondary" id="offerCancelBtn">Cancel</button>
+      <button type="button" class="btn" id="offerSubmitBtn">Start onboarding</button>
+    </div>
+  </div>
+</div>
+
+<script src="shared.js"></script>
+<script>
+let hires = [];
+let offerModalHireId = null;
+
+function formatDate(iso){
+  if(!iso) return '';
+  const [y,m,d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m-1, d));
+  return dt.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+function todayIso(){ return new Date().toISOString().slice(0,10); }
+function initials(name){
+  return name.split(' ').filter(Boolean).slice(0,2).map(w => w[0].toUpperCase()).join('');
+}
+function startOfWeekIso(){
+  const now = new Date();
+  const sunday = new Date(now);
+  sunday.setDate(now.getDate() - now.getDay());
+  return sunday;
+}
+
+function phaseLabel(hire){
+  const today = todayIso();
+  if(!hire.startDate) return 'Awaiting start date';
+  if(today < hire.startDate) return 'Starting ' + formatDate(hire.startDate);
+  const m1 = hire.checklist.items.find(i => i.n === 18);
+  const m2 = hire.checklist.items.find(i => i.n === 19);
+  if(m1 && today < m1.dueDate) return 'Month 1: Learn';
+  if(m2 && today < m2.dueDate) return 'Month 2: Contribute';
+  if(hire.probationEndDate && today < hire.probationEndDate) return 'Month 3: Evaluate';
+  return 'Decision due';
+}
+
+function renderWeek(){
+  const rows = [];
+  for(const h of hires){
+    if(h.archived) continue;
+    if(h.phase === 'awaiting_offer'){
+      const days = Math.floor((Date.now() - new Date(h.createdAt).getTime()) / 86400000);
+      rows.push({
+        pillClass: 'waiting', pillText: 'Waiting', title: 'Signed offer not back yet',
+        name: h.name, right: days <= 0 ? 'Hired today' : ('Hired ' + days + (days === 1 ? ' day' : ' days') + ' ago'),
+        href: null,
+      });
+    }
+    if(h.phase === 'active'){
+      for(const it of h.checklist.items){
+        if(it.done) continue;
+        const today = todayIso();
+        if(it.dueDate < today){
+          rows.push({ pillClass: 'overdue', pillText: 'Overdue', title: it.title, name: h.name, right: 'Was due ' + formatDate(it.dueDate), href: 'hire.html?id=' + h.id });
+        } else if(it.dueDate === today){
+          rows.push({ pillClass: 'neutral', pillText: 'Due today', title: it.title, name: h.name, right: '', href: 'hire.html?id=' + h.id });
+        }
+      }
+    }
+  }
+  // Overdue first, then due-today, then waiting.
+  const order = { overdue: 0, neutral: 1, waiting: 2 };
+  rows.sort((a, b) => order[a.pillClass] - order[b.pillClass]);
+
+  const el = document.getElementById('weekList');
+  if(!rows.length){
+    el.innerHTML = '<p style="margin:0;font-size:15px;color:var(--muted);">Nothing needs attention this week.</p>';
+    return;
+  }
+  el.innerHTML = rows.map(r => `
+    <${r.href ? 'a href="' + r.href + '"' : 'div'} class="week-row">
+      <span class="pill ${r.pillClass}">${escapeHtml(r.pillText)}</span>
+      <span style="font-size:17px;font-weight:700;">${escapeHtml(r.title)}</span>
+      <span style="font-size:16px;color:var(--muted);">${escapeHtml(r.name)}</span>
+      <span style="margin-left:auto;font-size:15px;color:${r.pillClass === 'overdue' ? 'var(--overdue-fg)' : 'var(--muted)'};">${escapeHtml(r.right)}</span>
+    </${r.href ? 'a' : 'div'}>
+  `).join('');
+}
+
+function renderAwaiting(){
+  const list = hires.filter(h => h.phase === 'awaiting_offer' && !h.archived);
+  document.getElementById('awaitingCount').textContent = '(' + list.length + ')';
+  document.getElementById('awaitingCards').innerHTML = list.map(h => `
+    <div class="awaiting-card">
+      <div>
+        <div style="font-size:20px;font-weight:700;">${escapeHtml(h.name)}</div>
+        <div style="font-size:16px;color:var(--muted);">${escapeHtml(h.role)}</div>
+      </div>
+      <p style="margin:0;font-size:15px;color:var(--muted);">Moved here with the "Hired" button on the recruitment board. No checklist yet.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;">
+        <button type="button" class="btn" onclick="openOfferModal('${h.id}')">Offer signed</button>
+        <button type="button" class="btn secondary" onclick="declineOffer('${h.id}')">Offer declined</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderActive(){
+  const list = hires.filter(h => h.phase === 'active' && !h.archived);
+  document.getElementById('activeCount').textContent = '(' + list.length + ')';
+  document.getElementById('activeCards').innerHTML = list.map(h => {
+    const pct = h.checklist.total ? Math.round(h.checklist.done / h.checklist.total * 100) : 0;
+    const daysLeft = h.probationEndDate ? Math.ceil((new Date(h.probationEndDate + 'T00:00:00Z').getTime() - Date.now()) / 86400000) : null;
+    return `
+    <a href="hire.html?id=${h.id}" class="hire-card">
+      <div style="display:flex;align-items:flex-start;gap:12px;">
+        <div class="avatar" aria-hidden="true">${escapeHtml(initials(h.name))}</div>
+        <div style="flex:1;">
+          <div style="font-size:20px;font-weight:700;">${escapeHtml(h.name)}</div>
+          <div style="font-size:15px;color:var(--muted);">${escapeHtml(h.role)}</div>
+        </div>
+        ${h.checklist.overdue ? `<span class="pill overdue">${h.checklist.overdue} overdue</span>` : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:8px 16px;font-size:15px;">
+        <div><span style="color:var(--muted);">Manager</span><br><b>${escapeHtml(h.managerName || '—')}</b></div>
+        <div><span style="color:var(--muted);">Started</span><br><b>${h.startDate ? formatDate(h.startDate) : '—'}</b></div>
+        <div><span style="color:var(--muted);">Phase</span><br><b>${escapeHtml(phaseLabel(h))}</b></div>
+        <div><span style="color:var(--muted);">Probation ends</span><br><b>${h.probationEndDate ? formatDate(h.probationEndDate) : '—'}</b></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-bottom:6px;"><span>Checklist</span><span>${h.checklist.done} of ${h.checklist.total} done</span></div>
+        <div class="progress-track" role="img" aria-label="${h.checklist.done} of ${h.checklist.total} items done"><div class="progress-fill" style="width:${pct}%;"></div></div>
+      </div>
+      <div style="font-size:15px;font-weight:700;color:var(--link);">${daysLeft === null ? '' : daysLeft > 0 ? daysLeft + ' days until the probation decision' : 'Probation decision is due'}</div>
+    </a>`;
+  }).join('');
+}
+
+function renderDone(){
+  const list = hires.filter(h => h.phase === 'done' && !h.archived);
+  document.getElementById('doneCount').textContent = '(' + list.length + ')';
+  const el = document.getElementById('doneArea');
+  if(!list.length){
+    el.innerHTML = '<div class="empty-note">Hires move here once their probation decision is made and the feedback survey is sent.</div>';
+    return;
+  }
+  el.innerHTML = '<div class="grid-cards">' + list.map(h => `
+    <a href="hire.html?id=${h.id}" class="hire-card" style="border-top-color:#9AA7AC;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="avatar" aria-hidden="true">${escapeHtml(initials(h.name))}</div>
+        <div><div style="font-size:20px;font-weight:700;">${escapeHtml(h.name)}</div><div style="font-size:15px;color:var(--muted);">${escapeHtml(h.role)}</div></div>
+      </div>
+    </a>`).join('') + '</div>';
+}
+
+function renderAll(){
+  renderWeek();
+  renderAwaiting();
+  renderActive();
+  renderDone();
+}
+
+async function openOfferModal(hireId){
+  offerModalHireId = hireId;
+  const hire = hires.find(h => h.id === hireId);
+  document.getElementById('offerModalWho').textContent = hire.name + ', ' + hire.role;
+  document.getElementById('offerStartDate').value = '';
+  document.getElementById('offerArrival').value = '10:30';
+
+  const sel = document.getElementById('offerManager');
+  sel.innerHTML = '<option value="">Choose the manager</option>';
+  try{
+    const res = await apiFetch('/managers');
+    if(res.ok){
+      const managers = await res.json();
+      for(const m of managers){
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name + (m.title ? ', ' + m.title : '');
+        sel.appendChild(opt);
+      }
+    }
+  }catch(e){ /* dropdown just stays with the placeholder */ }
+
+  document.getElementById('offerModal').classList.add('show');
+}
+function closeOfferModal(){
+  document.getElementById('offerModal').classList.remove('show');
+  offerModalHireId = null;
+}
+
+async function submitOffer(){
+  const startDate = document.getElementById('offerStartDate').value;
+  const managerId = document.getElementById('offerManager').value;
+  const arrivalTime = document.getElementById('offerArrival').value || '10:30';
+  if(!startDate){ showToast('Pick a start date first'); return; }
+
+  try{
+    const res = await apiFetch('/hires/' + offerModalHireId + '/offer-signed', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startDate, managerId: managerId || null, arrivalTime })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    const updated = await res.json();
+    closeOfferModal();
+    if(updated.tightTimeline){
+      showToast('Offer signed — timeline is tight, some items are due right away');
+    }
+    window.location.href = 'hire.html?id=' + updated.id;
+  }catch(e){
+    showToast('Could not start onboarding — try again');
+  }
+}
+
+async function declineOffer(hireId){
+  if(!confirm('Mark this offer as declined? This archives the card.')) return;
+  const reason = prompt('Optional: why did they decline?') || '';
+  try{
+    const res = await apiFetch('/hires/' + hireId + '/offer-declined', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Marked as declined');
+    load();
+  }catch(e){
+    showToast('Could not save — try again');
+  }
+}
+
+async function load(){
+  try{
+    const res = await apiFetch('/hires');
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    hires = await res.json();
+    renderAll();
+  }catch(e){
+    showToast('Could not load Onboarding — try refreshing');
+  }
+}
+
+document.getElementById('offerCancelBtn').addEventListener('click', closeOfferModal);
+document.getElementById('offerSubmitBtn').addEventListener('click', submitOffer);
+document.getElementById('logoutLink').addEventListener('click', (e) => { e.preventDefault(); clearAccessKey(); window.location.href = 'index.html'; });
+
+async function boot(){
+  if(!requireAccessKeyOrRedirect()) return;
+  document.getElementById('whoLabel').textContent = currentUserLabel();
+  const sunday = startOfWeekIso();
+  const thursday = new Date(sunday); thursday.setDate(sunday.getDate() + 4);
+  const weekday = (d) => d.toLocaleDateString('en-US', { weekday: 'long' });
+  const month = (d) => d.toLocaleDateString('en-US', { month: 'long' });
+  const weekRangeText = sunday.getMonth() === thursday.getMonth()
+    ? weekday(sunday) + ' ' + sunday.getDate() + ' to ' + weekday(thursday) + ' ' + thursday.getDate() + ' ' + month(thursday)
+    : weekday(sunday) + ' ' + sunday.getDate() + ' ' + month(sunday) + ' to ' + weekday(thursday) + ' ' + thursday.getDate() + ' ' + month(thursday);
+  document.getElementById('weekRange').textContent = weekRangeText;
+  await load();
+}
+boot();
+</script>
+</body>
+</html>
