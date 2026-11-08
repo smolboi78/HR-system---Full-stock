@@ -436,6 +436,55 @@ function rowToCandidate(row, { includeCv } = { includeCv: false }) {
   return candidate;
 }
 
+function getChecklistItems(hireId) {
+  return db.prepare('SELECT * FROM checklist_items WHERE hireId = ? ORDER BY n ASC').all(hireId);
+}
+
+function rowToHire(row, items) {
+  const total = items.length;
+  const done = items.filter((i) => i.done).length;
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const overdue = items.filter((i) => !i.done && i.dueDate < todayIso).length;
+  return {
+    id: row.id,
+    candidateId: row.candidateId || null,
+    name: row.name,
+    role: row.role,
+    company: row.company || '',
+    phase: row.phase,
+    archived: !!row.archived,
+    declineReason: row.declineReason || null,
+    managerId: row.managerId || null,
+    managerName: row.managerName || '',
+    startDate: row.startDate || null,
+    arrivalTime: row.arrivalTime || null,
+    offerSignedAt: row.offerSignedAt || null,
+    offerDeclinedAt: row.offerDeclinedAt || null,
+    probationEndDate: row.probationEndDate || null,
+    tightTimeline: !!row.tightTimeline,
+    notes: row.notes || '',
+    createdAt: row.createdAt,
+    checklist: {
+      total,
+      done,
+      overdue,
+      items: items.map((it) => ({
+        id: it.id,
+        n: it.n,
+        stage: it.stage,
+        title: it.title,
+        who: it.who,
+        dueDate: it.dueDate,
+        dueNow: !!it.dueNow,
+        email: it.email || null,
+        done: !!it.done,
+        doneAt: it.doneAt || null,
+        doneBy: it.doneBy || null,
+      })),
+    },
+  };
+}
+
 const app = express();
 app.use(express.json({ limit: '8mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -459,6 +508,9 @@ function requireAccessKey(req, res, next) {
   next();
 }
 app.use('/candidates', requireAccessKey);
+// Onboarding routes are stopgap-gated behind the same shared key until the
+// per-user login system (still pending real account emails) replaces it.
+app.use(['/hires', '/managers', '/checklist-items'], requireAccessKey);
 
 app.get('/candidates', (req, res) => {
   const rows = stmts.list.all();
@@ -752,6 +804,157 @@ app.delete('/candidates/:id', (req, res) => {
     return res.status(404).json({ error: 'Candidate not found' });
   }
   res.json({ ok: true });
+});
+
+// --- Onboarding ---
+
+app.get('/managers', (req, res) => {
+  const rows = db.prepare('SELECT * FROM managers WHERE active = 1 ORDER BY name ASC').all();
+  res.json(rows.map((r) => ({ id: r.id, name: r.name, title: r.title || '' })));
+});
+
+app.get('/hires', (req, res) => {
+  const rows = db.prepare('SELECT * FROM hires ORDER BY createdAt ASC').all();
+  res.json(rows.map((row) => rowToHire(row, getChecklistItems(row.id))));
+});
+
+app.get('/hires/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM hires WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Hire not found' });
+  res.json(rowToHire(row, getChecklistItems(row.id)));
+});
+
+app.patch('/hires/:id', (req, res) => {
+  const hire = db.prepare('SELECT * FROM hires WHERE id = ?').get(req.params.id);
+  if (!hire) return res.status(404).json({ error: 'Hire not found' });
+  const { notes } = req.body || {};
+  if (notes !== undefined) {
+    db.prepare('UPDATE hires SET notes = ? WHERE id = ?').run(notes ? String(notes) : null, hire.id);
+  }
+  const updated = db.prepare('SELECT * FROM hires WHERE id = ?').get(hire.id);
+  res.json(rowToHire(updated, getChecklistItems(hire.id)));
+});
+
+// The "Hired" button on an Interviewed & Shortlisted candidate: creates the
+// onboarding record under "Awaiting signed offer" and archives the candidate
+// on the Recruitment board (full history kept, just moved to Archived > Closed
+// — this is what "moves the candidate ... into Onboarding" actually does).
+app.post('/candidates/:id/hire', (req, res) => {
+  const existing = stmts.getById.get(req.params.id);
+  if (!existing) {
+    return res.status(404).json({ error: 'Candidate not found' });
+  }
+  if (existing.status !== 'approved' || existing.stage !== 'shortlisted' || existing.archived) {
+    return res.status(400).json({ error: 'Candidate must be Interviewed & Shortlisted, and not already archived.' });
+  }
+
+  const actor = NOTE_AUTHORS.includes((req.body || {}).actor) ? req.body.actor : 'HR';
+  const now = new Date().toISOString();
+  const hireId = crypto.randomUUID();
+
+  db.prepare(`
+    INSERT INTO hires (id, candidateId, name, role, company, phase, archived, createdAt)
+    VALUES (?, ?, ?, ?, ?, 'awaiting_offer', 0, ?)
+  `).run(hireId, existing.id, existing.name, existing.role, existing.company || null, now);
+
+  const fromLabel = describeCandidateStage(existing);
+  const toLabel = describeCandidateStage({ ...existing, archived: 1 });
+  const moveLogArr = existing.moveLog ? JSON.parse(existing.moveLog) : [];
+  if (fromLabel !== toLabel) {
+    moveLogArr.push({ at: now, by: actor, from: fromLabel, to: toLabel });
+  }
+  db.prepare('UPDATE candidates SET archived = 1, moveLog = ? WHERE id = ?').run(JSON.stringify(moveLogArr), existing.id);
+
+  const hireRow = db.prepare('SELECT * FROM hires WHERE id = ?').get(hireId);
+  res.status(201).json(rowToHire(hireRow, []));
+});
+
+app.patch('/hires/:id/offer-signed', (req, res) => {
+  const hire = db.prepare('SELECT * FROM hires WHERE id = ?').get(req.params.id);
+  if (!hire) {
+    return res.status(404).json({ error: 'Hire not found' });
+  }
+  if (hire.phase !== 'awaiting_offer') {
+    return res.status(400).json({ error: 'This hire is not awaiting a signed offer.' });
+  }
+
+  const { startDate, managerId, arrivalTime } = req.body || {};
+  if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+    return res.status(400).json({ error: 'A valid start date (YYYY-MM-DD) is required.' });
+  }
+  const manager = managerId ? db.prepare('SELECT * FROM managers WHERE id = ?').get(managerId) : null;
+  if (managerId && !manager) {
+    return res.status(400).json({ error: 'Unknown manager.' });
+  }
+
+  const now = new Date().toISOString();
+  const arrival = arrivalTime && /^\d{2}:\d{2}$/.test(arrivalTime) ? arrivalTime : '10:30';
+  const { items, tightTimeline, probationEndDate } = computeChecklist(startDate, now.slice(0, 10), arrival);
+
+  db.prepare(`
+    UPDATE hires SET
+      phase = 'active', managerId = @managerId, managerName = @managerName,
+      startDate = @startDate, arrivalTime = @arrivalTime, offerSignedAt = @offerSignedAt,
+      probationEndDate = @probationEndDate, tightTimeline = @tightTimeline
+    WHERE id = @id
+  `).run({
+    id: hire.id,
+    managerId: manager ? manager.id : null,
+    managerName: manager ? manager.name : null,
+    startDate,
+    arrivalTime: arrival,
+    offerSignedAt: now,
+    probationEndDate,
+    tightTimeline: tightTimeline ? 1 : 0,
+  });
+
+  const insertItem = db.prepare(`
+    INSERT INTO checklist_items (id, hireId, n, stage, title, who, dueDate, dueNow, email, done)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+  `);
+  for (const item of items) {
+    insertItem.run(crypto.randomUUID(), hire.id, item.n, item.stage, item.title, item.who, item.dueDate, item.dueNow ? 1 : 0, item.email);
+  }
+
+  const updated = db.prepare('SELECT * FROM hires WHERE id = ?').get(hire.id);
+  res.json(rowToHire(updated, getChecklistItems(hire.id)));
+});
+
+app.patch('/hires/:id/offer-declined', (req, res) => {
+  const hire = db.prepare('SELECT * FROM hires WHERE id = ?').get(req.params.id);
+  if (!hire) {
+    return res.status(404).json({ error: 'Hire not found' });
+  }
+  const { reason } = req.body || {};
+  db.prepare('UPDATE hires SET archived = 1, declineReason = ?, offerDeclinedAt = ? WHERE id = ?')
+    .run(reason ? String(reason) : null, new Date().toISOString(), hire.id);
+  const updated = db.prepare('SELECT * FROM hires WHERE id = ?').get(hire.id);
+  res.json(rowToHire(updated, getChecklistItems(hire.id)));
+});
+
+app.patch('/checklist-items/:id', (req, res) => {
+  const item = db.prepare('SELECT * FROM checklist_items WHERE id = ?').get(req.params.id);
+  if (!item) {
+    return res.status(404).json({ error: 'Checklist item not found' });
+  }
+
+  const body = req.body || {};
+  const actor = NOTE_AUTHORS.includes(body.actor) ? body.actor : 'HR';
+  const done = !!body.done;
+  const now = new Date().toISOString();
+
+  db.prepare('UPDATE checklist_items SET done = ?, doneAt = ?, doneBy = ? WHERE id = ?')
+    .run(done ? 1 : 0, done ? now : null, done ? actor : null, item.id);
+
+  // The Onboarding "Done" section is driven by the feedback survey (item 23)
+  // being sent, per the brief ("Hires move here once their probation
+  // decision is made and the feedback survey is sent").
+  if (item.n === 23) {
+    db.prepare('UPDATE hires SET phase = ? WHERE id = ?').run(done ? 'done' : 'active', item.hireId);
+  }
+
+  const updated = db.prepare('SELECT * FROM hires WHERE id = ?').get(item.hireId);
+  res.json(rowToHire(updated, getChecklistItems(item.hireId)));
 });
 
 app.listen(PORT, () => {
