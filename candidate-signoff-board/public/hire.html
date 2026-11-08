@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fullstock HR: Onboarding checklist</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+.layout{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start;}
+.main-col{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:22px;}
+.side-col{flex:1 1 280px;min-width:260px;display:flex;flex-direction:column;gap:18px;}
+.group{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden;}
+.group-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;padding:16px 20px;background:var(--active-bg);}
+.item-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:12px 20px;border-top:1px solid #E1F3FA;}
+.item-row label{display:flex;align-items:center;gap:12px;flex:1 1 320px;min-height:44px;cursor:pointer;}
+.item-row input[type=checkbox]{width:20px;height:20px;accent-color:var(--link);}
+.item-n{font-size:13px;font-weight:700;color:var(--link);width:22px;}
+.item-who{font-size:14px;color:var(--muted);width:130px;}
+.item-due{font-size:14px;width:150px;}
+.progress-track{height:12px;background:var(--active-bg);border-radius:999px;overflow:hidden;}
+.progress-fill{height:100%;background:var(--brand);}
+.avatar-lg{width:60px;height:60px;border-radius:50%;background:var(--active-bg);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:22px;color:var(--link);flex:none;}
+.side-section{background:#fff;border:1px solid var(--border);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;font-size:15px;}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <img class="logo" src="img/fullstock-logo.png" alt="Fullstock">
+  <nav aria-label="Main">
+    <a href="home.html">Home</a>
+    <a href="index.html">Recruitment</a>
+    <a href="onboarding.html" class="active" aria-current="page">Onboarding</a>
+  </nav>
+  <div class="who">
+    <span id="whoLabel">&nbsp;</span>
+    <a href="#" id="logoutLink">Log out</a>
+  </div>
+</header>
+
+<main style="max-width:1180px;">
+  <a href="onboarding.html" style="font-size:15px;display:inline-block;padding:10px 0;">← All hires</a>
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:6px 0 24px;">
+    <div class="avatar-lg" id="avatar" aria-hidden="true"></div>
+    <div style="flex:1;min-width:240px;">
+      <h1 id="hireName" style="font-size:34px;margin:0;"></h1>
+      <div class="sub" id="hireRole" style="font-size:17px;"></div>
+    </div>
+    <div style="min-width:260px;">
+      <div style="display:flex;justify-content:space-between;font-size:15px;color:var(--muted);margin-bottom:6px;">
+        <span>Checklist</span><span id="progressLabel"></span>
+      </div>
+      <div class="progress-track" role="img" id="progressBarWrap"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div class="main-col" id="groups"></div>
+    <aside class="side-col">
+      <section class="side-section">
+        <h2 style="margin:0 0 4px;font-size:18px;">Details</h2>
+        <div><span style="color:var(--muted);">Direct manager</span><br><b id="dManager"></b></div>
+        <div><span style="color:var(--muted);">Start date</span><br><b id="dStart"></b></div>
+        <div><span style="color:var(--muted);">Current phase</span><br><b id="dPhase"></b></div>
+        <div><span style="color:var(--muted);">Probation ends</span><br><b id="dProbation"></b></div>
+        <div id="dDecision" style="padding:10px 12px;background:var(--active-bg);border-radius:8px;font-weight:700;"></div>
+      </section>
+      <section class="side-section">
+        <h2 style="margin:0 0 4px;font-size:18px;">Files</h2>
+        <span style="color:var(--muted);">30-60-90 KPI plan</span>
+        <span style="color:var(--muted);">Info form and scanned documents</span>
+        <span style="color:var(--muted);">First-week schedule</span>
+        <p style="margin:0;font-size:13px;color:var(--muted);">Not stored here yet — see Templates for the blank forms.</p>
+      </section>
+      <section class="side-section">
+        <label for="notes" style="font-size:18px;font-weight:700;">Notes</label>
+        <textarea id="notes" rows="5" placeholder="Anything to remember about this hire" style="font:inherit;font-size:15px;padding:10px 12px;border:1px solid var(--border-strong);border-radius:8px;resize:vertical;"></textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <p style="margin:0;font-size:13px;color:var(--muted);">Visible to Nesma and the CEO.</p>
+          <button type="button" class="btn secondary" id="saveNotesBtn" style="padding:8px 14px;min-height:36px;font-size:14px;">Save</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<script src="shared.js"></script>
+<script>
+let hire = null;
+
+function qs(name){
+  return new URLSearchParams(window.location.search).get(name);
+}
+function initials(name){
+  return name.split(' ').filter(Boolean).slice(0,2).map(w => w[0].toUpperCase()).join('');
+}
+function formatDate(iso){
+  if(!iso) return '—';
+  const [y,m,d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m-1, d));
+  return dt.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+function todayIso(){ return new Date().toISOString().slice(0,10); }
+
+function phaseLabel(h){
+  const today = todayIso();
+  if(!h.startDate) return 'Awaiting start date';
+  if(today < h.startDate) return 'Starting ' + formatDate(h.startDate);
+  const m1 = h.checklist.items.find(i => i.n === 18);
+  const m2 = h.checklist.items.find(i => i.n === 19);
+  if(m1 && today < m1.dueDate) return 'Month 1: Learn';
+  if(m2 && today < m2.dueDate) return 'Month 2: Contribute';
+  if(h.probationEndDate && today < h.probationEndDate) return 'Month 3: Evaluate';
+  return 'Decision due';
+}
+
+const STAGE_SUBS = {
+  'Before Day 1': 'Starts when the offer is signed',
+  'Day 1': null, // filled with the real arrival time once we know it
+  'First week': null,
+  'Probation': 'Months 1 to 3',
+};
+
+function renderGroups(){
+  const today = todayIso();
+  const stages = ['Before Day 1', 'Day 1', 'First week', 'Probation'];
+  const html = stages.map((stage) => {
+    const items = hire.checklist.items.filter(i => i.stage === stage);
+    if(!items.length) return '';
+    const doneCount = items.filter(i => i.done).length;
+    let sub = STAGE_SUBS[stage];
+    if(stage === 'Day 1' && hire.startDate){
+      sub = formatDate(hire.startDate).replace(/, \d{4}$/, '') + ', ' + formatTime(hire.arrivalTime);
+    }
+    if(stage === 'First week' && hire.startDate){
+      sub = 'The week of ' + formatDate(hire.startDate).replace(/, \d{4}$/, '');
+    }
+    return `
+    <section class="group">
+      <div class="group-head">
+        <h2 style="margin:0;font-size:20px;">${escapeHtml(stage)}</h2>
+        ${sub ? `<span style="font-size:15px;color:var(--muted);">${escapeHtml(sub)}</span>` : ''}
+        <span style="margin-left:auto;font-size:14px;color:var(--muted);">${doneCount} of ${items.length}</span>
+      </div>
+      ${items.map((it) => {
+        const late = !it.done && it.dueDate < today;
+        const status = it.done ? 'Done' : (late ? 'Overdue' : 'Upcoming');
+        const pillClass = it.done ? 'done' : (late ? 'overdue' : 'neutral');
+        return `
+        <div class="item-row">
+          <label>
+            <input type="checkbox" ${it.done ? 'checked' : ''} onchange="toggleItem('${it.id}', this.checked)">
+            <span class="item-n">${it.n}</span>
+            <span style="font-size:16px;text-decoration:${it.done ? 'line-through' : 'none'};color:${it.done ? 'var(--muted)' : 'var(--ink)'};">${escapeHtml(it.title)}</span>
+          </label>
+          <span class="item-who">${escapeHtml(it.who)}</span>
+          <span class="item-due" style="color:${late ? 'var(--overdue-fg)' : 'var(--muted)'};">${formatDate(it.dueDate).replace(/, \d{4}$/, '')}${it.dueNow ? ' (due now)' : ''}</span>
+          <span class="pill ${pillClass}" style="width:84px;text-align:center;">${status}</span>
+          ${it.email ? `<a href="email.html?hireId=${hire.id}&itemId=${it.id}" style="font-size:14px;font-weight:700;padding:8px 12px;border:1px solid var(--border-strong);border-radius:8px;">${escapeHtml(it.email)}</a>` : ''}
+        </div>`;
+      }).join('')}
+    </section>`;
+  }).join('');
+  document.getElementById('groups').innerHTML = html;
+}
+
+function formatTime(hhmm){
+  if(!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = ((h + 11) % 12) + 1;
+  return h12 + ':' + String(m).padStart(2, '0') + ' ' + period;
+}
+
+function renderHeader(){
+  document.getElementById('avatar').textContent = initials(hire.name);
+  document.getElementById('hireName').textContent = hire.name;
+  document.getElementById('hireRole').textContent = hire.role + (hire.company ? ' (' + hire.company + ')' : '');
+  const total = hire.checklist.total, done = hire.checklist.done;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  document.getElementById('progressLabel').textContent = done + ' of ' + total + ' done';
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressBarWrap').setAttribute('aria-label', done + ' of ' + total + ' items done');
+
+  document.getElementById('dManager').textContent = hire.managerName || '—';
+  document.getElementById('dStart').textContent = formatDate(hire.startDate);
+  document.getElementById('dPhase').textContent = phaseLabel(hire);
+  document.getElementById('dProbation').textContent = formatDate(hire.probationEndDate);
+  const daysLeft = hire.probationEndDate ? Math.ceil((new Date(hire.probationEndDate + 'T00:00:00Z').getTime() - Date.now()) / 86400000) : null;
+  document.getElementById('dDecision').textContent = daysLeft === null ? '' : daysLeft > 0 ? daysLeft + ' days left to decide' : 'Decision is due';
+
+  document.getElementById('notes').value = hire.notes || '';
+}
+
+async function toggleItem(itemId, done){
+  try{
+    const res = await apiFetch('/checklist-items/' + itemId, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ done, actor: currentRole() === 'ceo' ? 'Reviewer' : 'HR' })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    hire = await res.json();
+    renderHeader();
+    renderGroups();
+    if(done){ showToast('Marked done'); }
+  }catch(e){
+    showToast('Could not save — try again');
+    await load();
+  }
+}
+
+async function saveNotes(){
+  try{
+    const res = await apiFetch('/hires/' + hire.id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes: document.getElementById('notes').value })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Notes saved');
+  }catch(e){
+    showToast('Could not save notes — try again');
+  }
+}
+
+async function load(){
+  const id = qs('id');
+  if(!id){ document.body.innerHTML = '<p style="padding:40px;">No hire selected.</p>'; return; }
+  try{
+    const res = await apiFetch('/hires/' + id);
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    hire = await res.json();
+    renderHeader();
+    renderGroups();
+  }catch(e){
+    showToast('Could not load this hire — try refreshing');
+  }
+}
+
+document.getElementById('saveNotesBtn').addEventListener('click', saveNotes);
+document.getElementById('logoutLink').addEventListener('click', (e) => { e.preventDefault(); clearAccessKey(); window.location.href = 'index.html'; });
+
+async function boot(){
+  if(!requireAccessKeyOrRedirect()) return;
+  document.getElementById('whoLabel').textContent = currentUserLabel();
+  await load();
+}
+boot();
+</script>
+</body>
+</html>
