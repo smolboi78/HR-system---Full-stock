@@ -173,7 +173,7 @@ function renderManagers(){
 async function uploadFile(slug, input){
   const file = input.files[0];
   if(!file) return;
-  if(file.size > 3.6 * 1024 * 1024){ showToast('That file is too large — under ~3.5MB'); input.value = ''; return; }
+  if(file.size > 3.6 * 1024 * 1024){ showToast('That file is too large, keep it under ~3.5MB'); input.value = ''; return; }
   const base64 = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result.split(',')[1]);
@@ -191,7 +191,7 @@ async function uploadFile(slug, input){
     await loadFiles();
     renderGroups();
   }catch(e){
-    showToast('Could not upload — try again');
+    showToast('Could not upload, try again');
   }
   input.value = '';
 }
@@ -208,7 +208,7 @@ async function downloadFile(slug){
     a.click();
     a.remove();
   }catch(e){
-    showToast('Could not download — try again');
+    showToast('Could not download, try again');
   }
 }
 
@@ -217,9 +217,9 @@ async function copyEmailTemplate(slug){
   if(!tpl){ showToast('No template saved yet'); return; }
   try{
     await navigator.clipboard.writeText('Subject: ' + tpl.subject + '\n\n' + tpl.body);
-    showToast('Copied — paste it into Outlook');
+    showToast('Copied. Paste it into Outlook');
   }catch(e){
-    showToast('Could not copy — select the text manually');
+    showToast('Could not copy, select the text manually');
   }
 }
 
@@ -238,7 +238,7 @@ async function setSurveyLink(){
     await loadLinks();
     renderGroups();
   }catch(e){
-    showToast('Could not save — try again');
+    showToast('Could not save, try again');
   }
 }
 
@@ -259,7 +259,7 @@ async function addManager(){
     await loadManagers();
     renderManagers();
   }catch(e){
-    showToast('Could not add — try again');
+    showToast('Could not add, try again');
   }
 }
 
@@ -272,7 +272,7 @@ async function removeManager(id){
     await loadManagers();
     renderManagers();
   }catch(e){
-    showToast('Could not remove — try again');
+    showToast('Could not remove, try again');
   }
 }
 
@@ -302,7 +302,7 @@ async function boot(){
     renderGroups();
     renderManagers();
   }catch(e){
-    showToast('Could not load Templates — try refreshing');
+    showToast('Could not load Templates, try refreshing');
   }
 }
 boot();

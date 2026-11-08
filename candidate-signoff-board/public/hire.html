@@ -71,7 +71,7 @@
         <span style="color:var(--muted);">30-60-90 KPI plan</span>
         <span style="color:var(--muted);">Info form and scanned documents</span>
         <span style="color:var(--muted);">First-week schedule</span>
-        <p style="margin:0;font-size:13px;color:var(--muted);">Not stored here yet — see Templates for the blank forms.</p>
+        <p style="margin:0;font-size:13px;color:var(--muted);">Not stored here yet. See Templates for the blank forms.</p>
       </section>
       <section class="side-section">
         <label for="notes" style="font-size:18px;font-weight:700;">Notes</label>
@@ -96,7 +96,7 @@ function initials(name){
   return name.split(' ').filter(Boolean).slice(0,2).map(w => w[0].toUpperCase()).join('');
 }
 function formatDate(iso){
-  if(!iso) return '—';
+  if(!iso) return 'Not set';
   const [y,m,d] = iso.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m-1, d));
   return dt.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -183,7 +183,7 @@ function renderHeader(){
   document.getElementById('progressFill').style.width = pct + '%';
   document.getElementById('progressBarWrap').setAttribute('aria-label', done + ' of ' + total + ' items done');
 
-  document.getElementById('dManager').textContent = hire.managerName || '—';
+  document.getElementById('dManager').textContent = hire.managerName || 'Not set';
   document.getElementById('dStart').textContent = formatDate(hire.startDate);
   document.getElementById('dPhase').textContent = phaseLabel(hire);
   document.getElementById('dProbation').textContent = formatDate(hire.probationEndDate);
@@ -206,7 +206,7 @@ async function toggleItem(itemId, done){
     renderGroups();
     if(done){ showToast('Marked done'); }
   }catch(e){
-    showToast('Could not save — try again');
+    showToast('Could not save, try again');
     await load();
   }
 }
@@ -221,7 +221,7 @@ async function saveNotes(){
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showToast('Notes saved');
   }catch(e){
-    showToast('Could not save notes — try again');
+    showToast('Could not save notes, try again');
   }
 }
 
@@ -235,7 +235,7 @@ async function load(){
     renderHeader();
     renderGroups();
   }catch(e){
-    showToast('Could not load this hire — try refreshing');
+    showToast('Could not load this hire, try refreshing');
   }
 }
 

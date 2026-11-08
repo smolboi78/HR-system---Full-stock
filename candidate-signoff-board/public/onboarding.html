@@ -205,10 +205,10 @@ function renderActive(){
         ${h.checklist.overdue ? `<span class="pill overdue">${h.checklist.overdue} overdue</span>` : ''}
       </div>
       <div style="display:grid;grid-template-columns:repeat(2, minmax(0,1fr));gap:8px 16px;font-size:15px;">
-        <div><span style="color:var(--muted);">Manager</span><br><b>${escapeHtml(h.managerName || '—')}</b></div>
-        <div><span style="color:var(--muted);">Started</span><br><b>${h.startDate ? formatDate(h.startDate) : '—'}</b></div>
+        <div><span style="color:var(--muted);">Manager</span><br><b>${escapeHtml(h.managerName || 'Not set')}</b></div>
+        <div><span style="color:var(--muted);">Started</span><br><b>${h.startDate ? formatDate(h.startDate) : 'Not set'}</b></div>
         <div><span style="color:var(--muted);">Phase</span><br><b>${escapeHtml(phaseLabel(h))}</b></div>
-        <div><span style="color:var(--muted);">Probation ends</span><br><b>${h.probationEndDate ? formatDate(h.probationEndDate) : '—'}</b></div>
+        <div><span style="color:var(--muted);">Probation ends</span><br><b>${h.probationEndDate ? formatDate(h.probationEndDate) : 'Not set'}</b></div>
       </div>
       <div>
         <div style="display:flex;justify-content:space-between;font-size:14px;color:var(--muted);margin-bottom:6px;"><span>Checklist</span><span>${h.checklist.done} of ${h.checklist.total} done</span></div>
@@ -288,11 +288,11 @@ async function submitOffer(){
     const updated = await res.json();
     closeOfferModal();
     if(updated.tightTimeline){
-      showToast('Offer signed — timeline is tight, some items are due right away');
+      showToast('Offer signed. The timeline is tight, so some items are due right away');
     }
     window.location.href = 'hire.html?id=' + updated.id;
   }catch(e){
-    showToast('Could not start onboarding — try again');
+    showToast('Could not start onboarding, try again');
   }
 }
 
@@ -309,7 +309,7 @@ async function declineOffer(hireId){
     showToast('Marked as declined');
     load();
   }catch(e){
-    showToast('Could not save — try again');
+    showToast('Could not save, try again');
   }
 }
 
@@ -320,7 +320,7 @@ async function load(){
     hires = await res.json();
     renderAll();
   }catch(e){
-    showToast('Could not load Onboarding — try refreshing');
+    showToast('Could not load Onboarding, try refreshing');
   }
 }
 

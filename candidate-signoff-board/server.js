@@ -284,7 +284,7 @@ if (db.prepare('SELECT COUNT(*) AS c FROM managers').get().c === 0) {
 if (db.prepare('SELECT COUNT(*) AS c FROM email_templates').get().c === 0) {
   const insertTemplate = db.prepare('INSERT INTO email_templates (key, subject, body, updatedAt) VALUES (?, ?, ?, ?)');
   const now = new Date().toISOString();
-  const DRAFT_NOTE = '[Draft placeholder — replace with Nesma\'s final text for this template.]';
+  const DRAFT_NOTE = '[Draft placeholder: replace with Nesma\'s final text for this template.]';
   [
     ['kpi_request', '30-60-90 KPI plan for [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\n[First name] has signed their offer as [Role], starting [start date]. Please fill in the attached 30-60-90 KPI plan so it\'s ready before they start.'],
     ['laptop_sim', 'Laptop and SIM request: [First name]', DRAFT_NOTE + '\n\nHi Mr. Mohamed Reda,\n\nCould you arrange a laptop and SIM card for our new hire, [First name] ([Role]), starting [start date]?'],
@@ -303,13 +303,34 @@ if (db.prepare('SELECT COUNT(*) AS c FROM email_templates').get().c === 0) {
 {
   const insertTemplateIfMissing = db.prepare('INSERT OR IGNORE INTO email_templates (key, subject, body, updatedAt) VALUES (?, ?, ?, ?)');
   const now = new Date().toISOString();
-  const DRAFT_NOTE = '[Draft placeholder — replace with Nesma\'s final text for this template.]';
+  const DRAFT_NOTE = '[Draft placeholder: replace with Nesma\'s final text for this template.]';
   [
-    ['month1_checkin', 'Month 1 check-in: [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\n[First name]\'s first month is up — could we set up the Month 1 check-in this week?'],
-    ['month2_checkin', 'Month 2 check-in: [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\nTime for [First name]\'s Month 2 check-in — let\'s find a time this week.'],
+    ['month1_checkin', 'Month 1 check-in: [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\n[First name]\'s first month is up. Could we set up the Month 1 check-in this week?'],
+    ['month2_checkin', 'Month 2 check-in: [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\nTime for [First name]\'s Month 2 check-in. Let\'s find a time this week.'],
     ['eval_report_request', 'Probation evaluation report: [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\n[First name]\'s probation decision is coming up. Could you fill in the evaluation report ahead of the decision?'],
     ['feedback_survey', 'A quick survey about your first few months', DRAFT_NOTE + '\n\nHi [First name],\n\nNow that your probation period is wrapping up, we\'d love your feedback: [Survey link]'],
   ].forEach(([key, subject, body]) => insertTemplateIfMissing.run(key, subject, body, now));
+}
+
+// One-time correction: the drafts above originally used an em dash, which
+// the build brief explicitly bans from UI text. Only touches bodies that
+// still start with the exact old placeholder, so a template Nesma has
+// since edited by hand is left alone.
+{
+  const OLD_NOTE = '[Draft placeholder — replace with Nesma\'s final text for this template.]';
+  const NEW_NOTE = '[Draft placeholder: replace with Nesma\'s final text for this template.]';
+  const rows = db.prepare('SELECT key, body FROM email_templates WHERE body LIKE ?').all(OLD_NOTE.slice(0, 20) + '%');
+  const updateBody = db.prepare('UPDATE email_templates SET body = ? WHERE key = ?');
+  for (const row of rows) {
+    if (row.body.startsWith(OLD_NOTE)) {
+      let fixed = NEW_NOTE + row.body.slice(OLD_NOTE.length);
+      // Two drafts also had an em dash mid-sentence, not just in the prefix.
+      fixed = fixed
+        .split('first month is up — could we').join('first month is up. Could we')
+        .split('Month 2 check-in — let\'s find').join('Month 2 check-in. Let\'s find');
+      updateBody.run(fixed, row.key);
+    }
+  }
 }
 
 // Seed one active hire (per the build brief) so the Onboarding screens aren't

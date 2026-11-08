@@ -84,7 +84,7 @@ function fillPlaceholders(text, hire){
     .split('[Manager name]').join(hire.managerName || '(manager)')
     .split('[start date]').join(hire.startDate ? formatDayDate(hire.startDate) : '')
     .split('[day, date]').join(hire.startDate ? formatDayDate(hire.startDate) : '')
-    .split('[Survey link]').join('[Survey link — paste the Jotform link from Templates]');
+    .split('[Survey link]').join('[Survey link: paste the Jotform link from Templates]');
 }
 
 let hireId, itemId, item, hire;
@@ -131,7 +131,7 @@ async function boot(){
       showSent('Checklist item ' + item.n + ' was already marked done' + (item.doneBy ? ' by ' + item.doneBy : '') + '.');
     }
   }catch(e){
-    showToast('Could not load this email — try again');
+    showToast('Could not load this email, try again');
   }
 }
 
@@ -157,7 +157,7 @@ async function send(){
     if(!res.ok) throw new Error('Request failed: ' + res.status);
     showSent('Checklist item ' + item.n + ' is ticked automatically, with today\'s date and your name.');
   }catch(e){
-    showToast('Opened Outlook, but could not mark the item done — try ticking it on the checklist');
+    showToast('Opened Outlook, but could not mark the item done. Try ticking it on the checklist');
   }
 }
 
@@ -166,9 +166,9 @@ async function copyText(){
   const body = document.getElementById('body').value;
   try{
     await navigator.clipboard.writeText('Subject: ' + subj + '\n\n' + body);
-    showToast('Copied — paste it into Outlook');
+    showToast('Copied. Paste it into Outlook');
   }catch(e){
-    showToast('Could not copy — select the text manually');
+    showToast('Could not copy, select the text manually');
   }
 }
 
