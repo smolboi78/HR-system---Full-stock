@@ -3,6 +3,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
 const { DatabaseSync } = require('node:sqlite');
+const { computeChecklist } = require('./onboarding');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'candidates.db');
@@ -167,6 +168,170 @@ if (rowsNeedingMoveBackfill.length) {
       entries.push({ at: row.decidedAt || row.dateAdded, by: author, from: 'Initial Screening', to: describeCandidateStage(row) });
     }
     updateMoveLog.run(JSON.stringify(entries), row.id);
+  }
+}
+
+// --- Onboarding module tables (additive only; the Recruitment board above is
+// untouched). Login/sessions land once real account emails are confirmed. ---
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    passwordHash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    createdAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    expiresAt TEXT NOT NULL,
+    usedAt TEXT
+  );
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    expiresAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS managers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    title TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    createdAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS hires (
+    id TEXT PRIMARY KEY,
+    candidateId TEXT,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    company TEXT,
+    phase TEXT NOT NULL DEFAULT 'awaiting_offer',
+    archived INTEGER NOT NULL DEFAULT 0,
+    declineReason TEXT,
+    managerId TEXT,
+    managerName TEXT,
+    startDate TEXT,
+    arrivalTime TEXT,
+    offerSignedAt TEXT,
+    offerDeclinedAt TEXT,
+    probationEndDate TEXT,
+    tightTimeline INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    createdAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS checklist_items (
+    id TEXT PRIMARY KEY,
+    hireId TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    stage TEXT NOT NULL,
+    title TEXT NOT NULL,
+    who TEXT NOT NULL,
+    dueDate TEXT NOT NULL,
+    dueNow INTEGER NOT NULL DEFAULT 0,
+    email TEXT,
+    done INTEGER NOT NULL DEFAULT 0,
+    doneAt TEXT,
+    doneBy TEXT,
+    notes TEXT
+  );
+  CREATE TABLE IF NOT EXISTS org_chart (
+    id TEXT PRIMARY KEY,
+    fileName TEXT,
+    base64 TEXT,
+    uploadedAt TEXT,
+    uploadedBy TEXT
+  );
+  CREATE TABLE IF NOT EXISTS email_templates (
+    key TEXT PRIMARY KEY,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    updatedAt TEXT NOT NULL
+  );
+`);
+
+// Seed the editable manager list once, from the build brief. HR can edit it
+// afterward (never re-seeded once any manager row exists).
+if (db.prepare('SELECT COUNT(*) AS c FROM managers').get().c === 0) {
+  const insertManager = db.prepare('INSERT INTO managers (id, name, title, active, createdAt) VALUES (?, ?, ?, 1, ?)');
+  const now = new Date().toISOString();
+  [
+    ['Hesham Hamouda', 'Co-Founder & Exec. Board Member'],
+    ['Ahmed Abdel Sattar', 'Managing Director'],
+    ['Ahmed Badran', 'Finance Manager'],
+    ['Ahmed Said', 'Supply Chain Manager'],
+    ['Alaa Mamdouh', 'Purchasing Manager'],
+  ].forEach(([name, title]) => insertManager.run(crypto.randomUUID(), name, title, now));
+}
+
+// Seed the email templates once. Only the Welcome email has Nesma's actual
+// approved text (from the design mockup); the rest are drafts clearly marked
+// as placeholders until she supplies the final wording, editable later without
+// a code change.
+if (db.prepare('SELECT COUNT(*) AS c FROM email_templates').get().c === 0) {
+  const insertTemplate = db.prepare('INSERT INTO email_templates (key, subject, body, updatedAt) VALUES (?, ?, ?, ?)');
+  const now = new Date().toISOString();
+  const DRAFT_NOTE = '[Draft placeholder — replace with Nesma\'s final text for this template.]';
+  [
+    ['kpi_request', '30-60-90 KPI plan for [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\n[First name] has signed their offer as [Role], starting [start date]. Please fill in the attached 30-60-90 KPI plan so it\'s ready before they start.'],
+    ['laptop_sim', 'Laptop and SIM request: [First name]', DRAFT_NOTE + '\n\nHi Mr. Mohamed Reda,\n\nCould you arrange a laptop and SIM card for our new hire, [First name] ([Role]), starting [start date]?'],
+    ['welcome', 'Welcome to Fullstock, [First name]!', 'Hi [First name],\n\nWe\'re really happy you\'re joining us as [Role], and we\'re looking forward to seeing you on [day, date] at 10:30 AM at our office in Sheikh Zayed: https://maps.app.goo.gl/99YYS9i49TvbmfuU7\n\nPlease bring the documents on the attached checklist. If anything isn\'t ready yet, bring what you have and we\'ll sort out the rest together.\n\nOn your first day, you\'ll start with me: we\'ll fill in a short info form and I\'ll get you set up on our systems. Then you\'ll meet [Manager name] and collect your laptop and SIM card from the HyperOne management. I\'ve also attached your schedule for the first week so you know what to expect.\n\nI\'ll give you a quick call the day before to confirm everything. If you have any questions before then, just reply to this email or give me a call.\n\nSee you soon!'],
+    ['day_before', 'Tomorrow: [First name] starts', DRAFT_NOTE + '\n\nHi [Manager name],\n\nJust a reminder that [First name] starts tomorrow, [day, date], at 10:30 AM.'],
+    ['team_announcement', 'Please welcome [First name] to the team', DRAFT_NOTE + '\n\nHi all,\n\nPlease join us in welcoming [First name], who joins us today as [Role].'],
+    ['manager_briefing', 'Onboarding [First name]: what you\'ll need to do', DRAFT_NOTE + '\n\nHi [Manager name],\n\nHere\'s what we\'ll need from you as [First name] onboards as [Role].'],
+  ].forEach(([key, subject, body]) => insertTemplate.run(key, subject, body, now));
+}
+
+// Seed one active hire (per the build brief) so the Onboarding screens aren't
+// empty on first boot. Only runs once — any existing hire row skips it.
+if (db.prepare('SELECT COUNT(*) AS c FROM hires').get().c === 0) {
+  const hireId = crypto.randomUUID();
+  const startDate = '2026-10-11';
+  const offerSignedAt = '2026-09-15';
+  const { items, tightTimeline, probationEndDate } = computeChecklist(startDate, offerSignedAt, '10:30');
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO hires
+      (id, candidateId, name, role, company, phase, archived, managerId, managerName, startDate, arrivalTime, offerSignedAt, probationEndDate, tightTimeline, createdAt)
+    VALUES
+      (@id, NULL, @name, @role, @company, 'active', 0, NULL, @managerName, @startDate, @arrivalTime, @offerSignedAt, @probationEndDate, @tightTimeline, @createdAt)
+  `).run({
+    id: hireId,
+    name: 'Hadeer Hassan',
+    role: 'Sales Supervisor, Greater Cairo',
+    company: 'Jammies',
+    managerName: 'Hesham Hamouda',
+    startDate,
+    arrivalTime: '10:30',
+    offerSignedAt,
+    probationEndDate,
+    tightTimeline: tightTimeline ? 1 : 0,
+    createdAt: now,
+  });
+
+  const insertItem = db.prepare(`
+    INSERT INTO checklist_items (id, hireId, n, stage, title, who, dueDate, dueNow, email, done, doneAt, doneBy, notes)
+    VALUES (@id, @hireId, @n, @stage, @title, @who, @dueDate, @dueNow, @email, @done, @doneAt, @doneBy, NULL)
+  `);
+  const ownerFor = (n) => (n === 13 || n === 16 ? 'Hesham Hamouda' : n === 14 ? 'Hadeer Hassan' : 'HR');
+  for (const item of items) {
+    const isDone = item.n <= 17; // items 1-17 done, 18 (Month 1 check-in) left overdue
+    insertItem.run({
+      id: crypto.randomUUID(),
+      hireId,
+      n: item.n,
+      stage: item.stage,
+      title: item.title,
+      who: item.who,
+      dueDate: item.dueDate,
+      dueNow: item.dueNow ? 1 : 0,
+      email: item.email,
+      done: isDone ? 1 : 0,
+      doneAt: isDone ? item.dueDate + 'T12:00:00.000Z' : null,
+      doneBy: isDone ? ownerFor(item.n) : null,
+    });
   }
 }
 
