@@ -283,6 +283,23 @@ if (db.prepare('SELECT COUNT(*) AS c FROM email_templates').get().c === 0) {
   ].forEach(([key, subject, body]) => insertTemplate.run(key, subject, body, now));
 }
 
+// The brief's six named templates don't cover every checklist item with an
+// email button (18/19 reminders, 20 request, 23 survey) — these four were
+// added after the first seed, so they're inserted per-key (INSERT OR IGNORE)
+// rather than gated on the whole table being empty, safe to run on every boot
+// whether or not the original seed above already ran.
+{
+  const insertTemplateIfMissing = db.prepare('INSERT OR IGNORE INTO email_templates (key, subject, body, updatedAt) VALUES (?, ?, ?, ?)');
+  const now = new Date().toISOString();
+  const DRAFT_NOTE = '[Draft placeholder — replace with Nesma\'s final text for this template.]';
+  [
+    ['month1_checkin', 'Month 1 check-in: [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\n[First name]\'s first month is up — could we set up the Month 1 check-in this week?'],
+    ['month2_checkin', 'Month 2 check-in: [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\nTime for [First name]\'s Month 2 check-in — let\'s find a time this week.'],
+    ['eval_report_request', 'Probation evaluation report: [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\n[First name]\'s probation decision is coming up. Could you fill in the evaluation report ahead of the decision?'],
+    ['feedback_survey', 'A quick survey about your first few months', DRAFT_NOTE + '\n\nHi [First name],\n\nNow that your probation period is wrapping up, we\'d love your feedback: [Survey link]'],
+  ].forEach(([key, subject, body]) => insertTemplateIfMissing.run(key, subject, body, now));
+}
+
 // Seed one active hire (per the build brief) so the Onboarding screens aren't
 // empty on first boot. Only runs once — any existing hire row skips it.
 if (db.prepare('SELECT COUNT(*) AS c FROM hires').get().c === 0) {
@@ -510,7 +527,7 @@ function requireAccessKey(req, res, next) {
 app.use('/candidates', requireAccessKey);
 // Onboarding routes are stopgap-gated behind the same shared key until the
 // per-user login system (still pending real account emails) replaces it.
-app.use(['/hires', '/managers', '/checklist-items'], requireAccessKey);
+app.use(['/hires', '/managers', '/checklist-items', '/email-templates'], requireAccessKey);
 
 app.get('/candidates', (req, res) => {
   const rows = stmts.list.all();
@@ -811,6 +828,13 @@ app.delete('/candidates/:id', (req, res) => {
 app.get('/managers', (req, res) => {
   const rows = db.prepare('SELECT * FROM managers WHERE active = 1 ORDER BY name ASC').all();
   res.json(rows.map((r) => ({ id: r.id, name: r.name, title: r.title || '' })));
+});
+
+app.get('/email-templates', (req, res) => {
+  const rows = db.prepare('SELECT * FROM email_templates').all();
+  const byKey = {};
+  for (const r of rows) byKey[r.key] = { subject: r.subject, body: r.body, updatedAt: r.updatedAt };
+  res.json(byKey);
 });
 
 app.get('/hires', (req, res) => {
