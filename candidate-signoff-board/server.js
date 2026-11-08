@@ -249,6 +249,18 @@ db.exec(`
     body TEXT NOT NULL,
     updatedAt TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS template_files (
+    slug TEXT PRIMARY KEY,
+    fileName TEXT,
+    base64 TEXT,
+    uploadedAt TEXT,
+    uploadedBy TEXT
+  );
+  CREATE TABLE IF NOT EXISTS template_links (
+    slug TEXT PRIMARY KEY,
+    url TEXT,
+    updatedAt TEXT
+  );
 `);
 
 // Seed the editable manager list once, from the build brief. HR can edit it
@@ -527,7 +539,7 @@ function requireAccessKey(req, res, next) {
 app.use('/candidates', requireAccessKey);
 // Onboarding routes are stopgap-gated behind the same shared key until the
 // per-user login system (still pending real account emails) replaces it.
-app.use(['/hires', '/managers', '/checklist-items', '/email-templates'], requireAccessKey);
+app.use(['/hires', '/managers', '/checklist-items', '/email-templates', '/template-files', '/template-links'], requireAccessKey);
 
 app.get('/candidates', (req, res) => {
   const rows = stmts.list.all();
@@ -830,11 +842,87 @@ app.get('/managers', (req, res) => {
   res.json(rows.map((r) => ({ id: r.id, name: r.name, title: r.title || '' })));
 });
 
+// Per the brief: "Make this list editable by HR rather than hard-coded,
+// because it will change." No mockup shows this UI, so it lives on the
+// Templates page alongside the other HR-admin bits (org chart upload).
+app.post('/managers', (req, res) => {
+  const { name, title } = req.body || {};
+  if (!name || !String(name).trim()) {
+    return res.status(400).json({ error: 'Name is required.' });
+  }
+  const id = crypto.randomUUID();
+  db.prepare('INSERT INTO managers (id, name, title, active, createdAt) VALUES (?, ?, ?, 1, ?)')
+    .run(id, String(name).trim(), title ? String(title).trim() : null, new Date().toISOString());
+  res.status(201).json({ id, name: String(name).trim(), title: title ? String(title).trim() : '' });
+});
+
+app.delete('/managers/:id', (req, res) => {
+  const result = db.prepare('UPDATE managers SET active = 0 WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) {
+    return res.status(404).json({ error: 'Manager not found' });
+  }
+  res.json({ ok: true });
+});
+
 app.get('/email-templates', (req, res) => {
   const rows = db.prepare('SELECT * FROM email_templates').all();
   const byKey = {};
   for (const r of rows) byKey[r.key] = { subject: r.subject, body: r.body, updatedAt: r.updatedAt };
   res.json(byKey);
+});
+
+const TEMPLATE_FILE_SLUGS = ['org_chart', 'kpi_plan_tool', 'kpi_plan_blank', 'documents_checklist', 'first_week_schedule', 'info_form'];
+
+app.get('/template-files', (req, res) => {
+  const rows = db.prepare('SELECT slug, fileName, uploadedAt, uploadedBy FROM template_files').all();
+  const bySlug = {};
+  for (const r of rows) bySlug[r.slug] = { fileName: r.fileName, uploadedAt: r.uploadedAt, uploadedBy: r.uploadedBy };
+  res.json(bySlug);
+});
+
+app.get('/template-files/:slug', (req, res) => {
+  const row = db.prepare('SELECT * FROM template_files WHERE slug = ?').get(req.params.slug);
+  if (!row || !row.base64) {
+    return res.status(404).json({ error: 'Not uploaded yet' });
+  }
+  res.json({ fileName: row.fileName, base64: row.base64 });
+});
+
+app.post('/template-files/:slug', (req, res) => {
+  const slug = req.params.slug;
+  if (!TEMPLATE_FILE_SLUGS.includes(slug)) {
+    return res.status(400).json({ error: `slug must be one of ${TEMPLATE_FILE_SLUGS.join(', ')}` });
+  }
+  const { fileName, base64, uploadedBy } = req.body || {};
+  if (!fileName || !base64) {
+    return res.status(400).json({ error: 'fileName and base64 are required.' });
+  }
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO template_files (slug, fileName, base64, uploadedAt, uploadedBy) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(slug) DO UPDATE SET fileName = excluded.fileName, base64 = excluded.base64, uploadedAt = excluded.uploadedAt, uploadedBy = excluded.uploadedBy
+  `).run(slug, String(fileName), String(base64), now, uploadedBy ? String(uploadedBy) : 'HR');
+  res.json({ fileName, uploadedAt: now, uploadedBy: uploadedBy || 'HR' });
+});
+
+app.get('/template-links', (req, res) => {
+  const rows = db.prepare('SELECT slug, url, updatedAt FROM template_links').all();
+  const bySlug = {};
+  for (const r of rows) bySlug[r.slug] = { url: r.url, updatedAt: r.updatedAt };
+  res.json(bySlug);
+});
+
+app.post('/template-links/:slug', (req, res) => {
+  const { url } = req.body || {};
+  if (!url || !String(url).trim()) {
+    return res.status(400).json({ error: 'url is required.' });
+  }
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO template_links (slug, url, updatedAt) VALUES (?, ?, ?)
+    ON CONFLICT(slug) DO UPDATE SET url = excluded.url, updatedAt = excluded.updatedAt
+  `).run(req.params.slug, String(url).trim(), now);
+  res.json({ url: String(url).trim(), updatedAt: now });
 });
 
 app.get('/hires', (req, res) => {

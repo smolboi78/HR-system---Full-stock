@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fullstock HR: Templates</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap">
+<link rel="stylesheet" href="shared.css">
+<style>
+.tpl-group{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:18px;}
+.tpl-head{margin:0;font-size:20px;padding:16px 20px;background:var(--active-bg);}
+.tpl-row{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px 20px;border-top:1px solid #E1F3FA;}
+.tpl-name{flex:1 1 320px;min-width:0;}
+.tpl-name .n{font-size:17px;font-weight:700;}
+.tpl-name .d{font-size:14px;color:var(--muted);}
+.fmt-badge{font-size:13px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--neutral-bg);color:var(--neutral-fg);min-width:54px;text-align:center;}
+.tpl-action{font-size:15px;font-weight:700;padding:10px 16px;min-height:44px;box-sizing:border-box;border-radius:8px;text-align:center;min-width:120px;}
+.mgr-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #E1F3FA;}
+.mgr-row:first-child{border-top:0;}
+input[type=file]{font-size:14px;}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <img class="logo" src="img/fullstock-logo.png" alt="Fullstock">
+  <nav aria-label="Main">
+    <a href="home.html">Home</a>
+    <a href="index.html">Recruitment</a>
+    <a href="onboarding.html">Onboarding</a>
+    <a href="templates.html" class="active" aria-current="page">Templates</a>
+  </nav>
+  <div class="who">
+    <span id="whoLabel">&nbsp;</span>
+    <a href="#" id="logoutLink">Log out</a>
+  </div>
+</header>
+
+<main style="display:flex;flex-direction:column;gap:24px;">
+  <div>
+    <h1>Templates</h1>
+    <p class="sub">The latest version of every onboarding template, in one place. Only HR can upload or replace a file.</p>
+  </div>
+
+  <div id="groups"></div>
+
+  <section class="tpl-group">
+    <h2 class="tpl-head">Direct managers</h2>
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:4px;" id="managersList"></div>
+    <div id="managerAddRow" style="display:flex;flex-wrap:wrap;gap:10px;padding:14px 20px;border-top:1px solid #E1F3FA;">
+      <input type="text" id="newMgrName" placeholder="Name" style="flex:1 1 180px;padding:9px 12px;border:1px solid var(--border-strong);border-radius:8px;">
+      <input type="text" id="newMgrTitle" placeholder="Title" style="flex:1 1 220px;padding:9px 12px;border:1px solid var(--border-strong);border-radius:8px;">
+      <button type="button" class="btn secondary" id="addMgrBtn">Add manager</button>
+    </div>
+  </section>
+</main>
+
+<script src="shared.js"></script>
+<script>
+let emailTemplates = {};
+let templateFiles = {};
+let templateLinks = {};
+let managers = [];
+
+const FILE_SLUG_LABEL = {
+  kpi_plan_tool: { name: '30-60-90 KPI plan tool', desc: 'The manager fills in the KPIs; it scores everything and prints the plan and the evaluation report', fmt: 'HTML' },
+  kpi_plan_blank: { name: '30-60-90 KPI plan, blank', desc: 'Two-page plan for managers who prefer Word', fmt: 'Word' },
+  documents_checklist: { name: 'New hire documents checklist', desc: 'Attached to the welcome email', fmt: 'PDF' },
+  first_week_schedule: { name: 'First-week schedule', desc: 'Type the name, role, manager and start date, then save as PDF', fmt: 'HTML' },
+  info_form: { name: 'New hire information form', desc: 'Page 1 info form, page 2 documents checklist; print and fill in on Day 1', fmt: 'Word' },
+};
+const EMAIL_SLUG_LABEL = {
+  kpi_request: { name: 'KPI plan request email', desc: 'To the manager, once the offer is signed' },
+  laptop_sim: { name: 'Laptop and SIM request email', desc: 'To Mr. Mohamed Reda, HyperOne HR, 1 week before' },
+  welcome: { name: 'Welcome email', desc: 'To the new hire, 3 days before, with the two attachments below' },
+  day_before: { name: 'Day-before reminder email', desc: 'To the manager, 1 day before' },
+  team_announcement: { name: 'Team announcement email', desc: 'To everyone, the morning of Day 1' },
+  manager_briefing: { name: 'Manager briefing email', desc: 'What the direct manager does at each step' },
+};
+
+function fileRow(slug){
+  const meta = FILE_SLUG_LABEL[slug];
+  const info = templateFiles[slug];
+  const uploaded = !!(info && info.fileName);
+  return `
+    <div class="tpl-row">
+      <div class="tpl-name"><div class="n">${escapeHtml(meta.name)}</div><div class="d">${escapeHtml(meta.desc)}</div></div>
+      <span class="fmt-badge">${meta.fmt}</span>
+      ${uploaded ? `<a href="#" class="tpl-action" style="background:var(--brand);color:var(--ink);text-decoration:none;" onclick="downloadFile('${slug}');return false;">Download</a>` : `<span style="font-size:14px;color:var(--waiting-fg);">Not uploaded yet</span>`}
+      <label class="btn secondary" style="padding:8px 14px;min-height:36px;font-size:14px;cursor:pointer;">
+        ${uploaded ? 'Replace' : 'Upload'}
+        <input type="file" style="display:none;" onchange="uploadFile('${slug}', this)">
+      </label>
+    </div>`;
+}
+
+function emailRow(slug){
+  const meta = EMAIL_SLUG_LABEL[slug];
+  return `
+    <div class="tpl-row">
+      <div class="tpl-name"><div class="n">${escapeHtml(meta.name)}</div><div class="d">${escapeHtml(meta.desc)}</div></div>
+      <span class="fmt-badge">Email</span>
+      <button type="button" class="tpl-action btn" onclick="copyEmailTemplate('${slug}')">Copy text</button>
+    </div>`;
+}
+
+function surveyRow(){
+  const link = templateLinks.feedback_survey;
+  const has = !!(link && link.url);
+  return `
+    <div class="tpl-row">
+      <div class="tpl-name"><div class="n">Onboarding feedback survey</div><div class="d">Jotform link to send to the new hire</div></div>
+      <span class="fmt-badge">Link</span>
+      ${has ? `<a href="${escapeHtml(link.url)}" target="_blank" rel="noopener" class="tpl-action" style="background:var(--brand);color:var(--ink);text-decoration:none;">Open link</a>` : `<span style="font-size:14px;color:var(--waiting-fg);">Not set yet</span>`}
+      <button type="button" class="btn secondary" style="padding:8px 14px;min-height:36px;font-size:14px;" onclick="setSurveyLink()">${has ? 'Edit link' : 'Set link'}</button>
+    </div>`;
+}
+
+function orgChartRow(){
+  const info = templateFiles.org_chart;
+  const uploaded = !!(info && info.fileName);
+  return `
+    <div class="tpl-row">
+      <div class="tpl-name"><div class="n">Organizational chart</div><div class="d">Used in the company introduction</div></div>
+      <span class="fmt-badge">PDF</span>
+      <span style="font-size:14px;color:${uploaded ? 'var(--done-fg)' : 'var(--waiting-fg)'};">${uploaded ? ('Uploaded ' + new Date(info.uploadedAt).toLocaleDateString()) : 'Not uploaded yet'}</span>
+      <label class="btn secondary" style="padding:8px 14px;min-height:36px;font-size:14px;cursor:pointer;">
+        ${uploaded ? 'Replace' : 'Upload'}
+        <input type="file" style="display:none;" onchange="uploadFile('org_chart', this)">
+      </label>
+    </div>`;
+}
+
+function renderGroups(){
+  document.getElementById('groups').innerHTML = `
+    <section class="tpl-group">
+      <h2 class="tpl-head">Before Day 1</h2>
+      ${fileRow('kpi_plan_tool')}
+      ${fileRow('kpi_plan_blank')}
+      ${emailRow('kpi_request')}
+      ${emailRow('laptop_sim')}
+      ${emailRow('welcome')}
+      ${fileRow('documents_checklist')}
+      ${fileRow('first_week_schedule')}
+      ${emailRow('day_before')}
+    </section>
+    <section class="tpl-group">
+      <h2 class="tpl-head">Day 1</h2>
+      ${emailRow('team_announcement')}
+      ${fileRow('info_form')}
+      ${orgChartRow()}
+    </section>
+    <section class="tpl-group">
+      <h2 class="tpl-head">Managers</h2>
+      ${emailRow('manager_briefing')}
+    </section>
+    <section class="tpl-group">
+      <h2 class="tpl-head">End of probation</h2>
+      ${surveyRow()}
+    </section>
+  `;
+}
+
+function renderManagers(){
+  document.getElementById('managersList').innerHTML = managers.map(m => `
+    <div class="mgr-row">
+      <span style="flex:1;font-size:15px;"><b>${escapeHtml(m.name)}</b>${m.title ? ', ' + escapeHtml(m.title) : ''}</span>
+      <button type="button" class="btn ghost" style="padding:6px 12px;min-height:32px;font-size:13px;" onclick="removeManager('${m.id}')">Remove</button>
+    </div>
+  `).join('') || '<p style="margin:0;color:var(--muted);font-size:14px;">No managers yet.</p>';
+}
+
+async function uploadFile(slug, input){
+  const file = input.files[0];
+  if(!file) return;
+  if(file.size > 3.6 * 1024 * 1024){ showToast('That file is too large — under ~3.5MB'); input.value = ''; return; }
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  try{
+    const res = await apiFetch('/template-files/' + slug, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name, base64, uploadedBy: currentRole() === 'ceo' ? 'Reviewer' : 'HR' })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Uploaded');
+    await loadFiles();
+    renderGroups();
+  }catch(e){
+    showToast('Could not upload — try again');
+  }
+  input.value = '';
+}
+
+async function downloadFile(slug){
+  try{
+    const res = await apiFetch('/template-files/' + slug);
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    const { fileName, base64 } = await res.json();
+    const a = document.createElement('a');
+    a.href = 'data:application/octet-stream;base64,' + base64;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }catch(e){
+    showToast('Could not download — try again');
+  }
+}
+
+async function copyEmailTemplate(slug){
+  const tpl = emailTemplates[slug];
+  if(!tpl){ showToast('No template saved yet'); return; }
+  try{
+    await navigator.clipboard.writeText('Subject: ' + tpl.subject + '\n\n' + tpl.body);
+    showToast('Copied — paste it into Outlook');
+  }catch(e){
+    showToast('Could not copy — select the text manually');
+  }
+}
+
+async function setSurveyLink(){
+  const current = (templateLinks.feedback_survey && templateLinks.feedback_survey.url) || '';
+  const url = prompt('Jotform survey link:', current);
+  if(!url) return;
+  try{
+    const res = await apiFetch('/template-links/feedback_survey', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Saved');
+    await loadLinks();
+    renderGroups();
+  }catch(e){
+    showToast('Could not save — try again');
+  }
+}
+
+async function addManager(){
+  const name = document.getElementById('newMgrName').value.trim();
+  const title = document.getElementById('newMgrTitle').value.trim();
+  if(!name){ showToast('Enter a name first'); return; }
+  try{
+    const res = await apiFetch('/managers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, title })
+    });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    document.getElementById('newMgrName').value = '';
+    document.getElementById('newMgrTitle').value = '';
+    showToast('Manager added');
+    await loadManagers();
+    renderManagers();
+  }catch(e){
+    showToast('Could not add — try again');
+  }
+}
+
+async function removeManager(id){
+  if(!confirm('Remove this manager from the list?')) return;
+  try{
+    const res = await apiFetch('/managers/' + id, { method: 'DELETE' });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    showToast('Removed');
+    await loadManagers();
+    renderManagers();
+  }catch(e){
+    showToast('Could not remove — try again');
+  }
+}
+
+async function loadFiles(){
+  const res = await apiFetch('/template-files');
+  if(res.ok) templateFiles = await res.json();
+}
+async function loadLinks(){
+  const res = await apiFetch('/template-links');
+  if(res.ok) templateLinks = await res.json();
+}
+async function loadManagers(){
+  const res = await apiFetch('/managers');
+  if(res.ok) managers = await res.json();
+}
+
+document.getElementById('addMgrBtn').addEventListener('click', addManager);
+document.getElementById('logoutLink').addEventListener('click', (e) => { e.preventDefault(); clearAccessKey(); window.location.href = 'index.html'; });
+
+async function boot(){
+  if(!requireAccessKeyOrRedirect()) return;
+  document.getElementById('whoLabel').textContent = currentUserLabel();
+  try{
+    const res = await apiFetch('/email-templates');
+    if(res.ok) emailTemplates = await res.json();
+    await Promise.all([loadFiles(), loadLinks(), loadManagers()]);
+    renderGroups();
+    renderManagers();
+  }catch(e){
+    showToast('Could not load Templates — try refreshing');
+  }
+}
+boot();
+</script>
+</body>
+</html>
