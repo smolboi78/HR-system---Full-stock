@@ -387,6 +387,27 @@ function writeChecklistItems(hireId, items, doneUpTo, ownerFor) {
   }
 }
 
+// Self-heal: a bug (now fixed) crashed partway through "Offer signed" for a
+// real hire — the hires row was already updated to 'active' before the
+// checklist-item insert loop hit its first (undefined-email) item and
+// crashed, leaving that hire stuck active with no checklist at all and no
+// way to retry from the UI (offer-signed only works from 'awaiting_offer').
+// The only way a non-awaiting hire can have zero checklist items is this
+// bug, so it's safe to detect generically and regenerate from its own
+// stored startDate/offerSignedAt/arrivalTime, with nothing marked done
+// (that really is where it was left).
+{
+  const broken = db.prepare(`
+    SELECT h.* FROM hires h
+    WHERE h.phase != 'awaiting_offer' AND h.startDate IS NOT NULL AND h.offerSignedAt IS NOT NULL
+      AND (SELECT COUNT(*) FROM checklist_items WHERE hireId = h.id) = 0
+  `).all();
+  for (const hire of broken) {
+    const { items } = computeChecklist(hire.startDate, hire.offerSignedAt.slice(0, 10), hire.arrivalTime);
+    writeChecklistItems(hire.id, items, 0, () => null);
+  }
+}
+
 // Seed data per the build brief agreed 11 Nov 2026. Runs on every boot but is
 // self-limiting: Hadeer's checklist is only rebuilt if it's still in the
 // shape an earlier version of this seed left it in (21 items is the current
