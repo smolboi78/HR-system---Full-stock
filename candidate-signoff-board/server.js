@@ -1122,7 +1122,7 @@ app.patch('/hires/:id/offer-signed', (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
   `);
   for (const item of items) {
-    insertItem.run(crypto.randomUUID(), hire.id, item.n, item.stage, item.title, item.who, item.dueDate, item.dueNow ? 1 : 0, item.email);
+    insertItem.run(crypto.randomUUID(), hire.id, item.n, item.stage, item.title, item.who, item.dueDate, item.dueNow ? 1 : 0, JSON.stringify(item.emails));
   }
 
   const updated = db.prepare('SELECT * FROM hires WHERE id = ?').get(hire.id);
