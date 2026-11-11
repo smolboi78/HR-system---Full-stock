@@ -57,26 +57,24 @@ input[type=file]{font-size:14px;}
 
 <script src="shared.js"></script>
 <script>
-let emailTemplates = {};
 let templateFiles = {};
 let templateLinks = {};
 let managers = [];
 
 const FILE_SLUG_LABEL = {
-  kpi_plan_tool: { name: '30-60-90 KPI plan tool', desc: 'The manager fills in the KPIs; it scores everything and prints the plan and the evaluation report', fmt: 'HTML' },
-  kpi_plan_blank: { name: '30-60-90 KPI plan, blank', desc: 'Two-page plan for managers who prefer Word', fmt: 'Word' },
-  documents_checklist: { name: 'New hire documents checklist', desc: 'Attached to the welcome email', fmt: 'PDF' },
-  first_week_schedule: { name: 'First-week schedule', desc: 'Type the name, role, manager and start date, then save as PDF', fmt: 'HTML' },
-  info_form: { name: 'New hire information form', desc: 'Page 1 info form, page 2 documents checklist; print and fill in on Day 1', fmt: 'Word' },
+  process_summary: { name: 'Onboarding Process Summary', desc: 'The whole process, start to finish', fmt: 'PDF' },
+  attendance_policy: { name: 'Attendance and Vacation Policy', desc: 'Shared in the Day 1 company introduction', fmt: 'PDF' },
+  work_locations: { name: 'Work Locations', desc: 'Shared in the Day 1 company introduction', fmt: 'PDF' },
+  documents_checklist: { name: 'New Hire Documents Checklist', desc: 'Attached to the welcome email', fmt: 'PDF' },
+  info_form: { name: 'New Hire Information Form', desc: 'Filled in and scanned on Day 1', fmt: 'PDF' },
+  systems_checklist: { name: 'New Hire Systems Checklist', desc: 'ZenHR, Bricks, Odoo and email access', fmt: 'PDF' },
+  kpi_plan_tool: { name: '30-60-90 KPI plan tool', desc: 'Per-role plan; the manager fills in the KPIs', fmt: 'HTML' },
+  email_templates_doc: { name: 'Onboarding Email Templates', desc: 'The final text of every onboarding email, in one document', fmt: 'Word' },
 };
-const EMAIL_SLUG_LABEL = {
-  kpi_request: { name: 'KPI plan request email', desc: 'To the manager, once the offer is signed' },
-  laptop_sim: { name: 'Laptop and SIM request email', desc: 'To Mr. Mohamed Reda, HyperOne HR, 1 week before' },
-  welcome: { name: 'Welcome email', desc: 'To the new hire, 3 days before, with the two attachments below' },
-  day_before: { name: 'Day-before reminder email', desc: 'To the manager, 1 day before' },
-  team_announcement: { name: 'Team announcement email', desc: 'To everyone, the morning of Day 1' },
-  manager_briefing: { name: 'Manager briefing email', desc: 'What the direct manager does at each step' },
-};
+const ORG_CHART_SLUGS = [
+  { slug: 'org_chart_fullstock', name: 'Fullstock org chart' },
+  { slug: 'org_chart_jammies', name: 'Jammies org chart' },
+];
 
 function fileRow(slug){
   const meta = FILE_SLUG_LABEL[slug];
@@ -94,16 +92,6 @@ function fileRow(slug){
     </div>`;
 }
 
-function emailRow(slug){
-  const meta = EMAIL_SLUG_LABEL[slug];
-  return `
-    <div class="tpl-row">
-      <div class="tpl-name"><div class="n">${escapeHtml(meta.name)}</div><div class="d">${escapeHtml(meta.desc)}</div></div>
-      <span class="fmt-badge">Email</span>
-      <button type="button" class="tpl-action btn" onclick="copyEmailTemplate('${slug}')">Copy text</button>
-    </div>`;
-}
-
 function surveyRow(){
   const link = templateLinks.feedback_survey;
   const has = !!(link && link.url);
@@ -116,17 +104,17 @@ function surveyRow(){
     </div>`;
 }
 
-function orgChartRow(){
-  const info = templateFiles.org_chart;
+function orgChartRow({ slug, name }){
+  const info = templateFiles[slug];
   const uploaded = !!(info && info.fileName);
   return `
     <div class="tpl-row">
-      <div class="tpl-name"><div class="n">Organizational chart</div><div class="d">Used in the company introduction</div></div>
+      <div class="tpl-name"><div class="n">${escapeHtml(name)}</div><div class="d">Used in the Day 1 company introduction</div></div>
       <span class="fmt-badge">PDF</span>
       <span style="font-size:14px;color:${uploaded ? 'var(--done-fg)' : 'var(--waiting-fg)'};">${uploaded ? ('Uploaded ' + new Date(info.uploadedAt).toLocaleDateString()) : 'Not uploaded yet'}</span>
       <label class="btn secondary" style="padding:8px 14px;min-height:36px;font-size:14px;cursor:pointer;">
         ${uploaded ? 'Replace' : 'Upload'}
-        <input type="file" style="display:none;" onchange="uploadFile('org_chart', this)">
+        <input type="file" style="display:none;" onchange="uploadFile('${slug}', this)">
       </label>
     </div>`;
 }
@@ -134,28 +122,25 @@ function orgChartRow(){
 function renderGroups(){
   document.getElementById('groups').innerHTML = `
     <section class="tpl-group">
-      <h2 class="tpl-head">Before Day 1</h2>
-      ${fileRow('kpi_plan_tool')}
-      ${fileRow('kpi_plan_blank')}
-      ${emailRow('kpi_request')}
-      ${emailRow('laptop_sim')}
-      ${emailRow('welcome')}
+      <h2 class="tpl-head">Documents</h2>
+      ${fileRow('process_summary')}
+      ${fileRow('attendance_policy')}
+      ${fileRow('work_locations')}
       ${fileRow('documents_checklist')}
-      ${fileRow('first_week_schedule')}
-      ${emailRow('day_before')}
-    </section>
-    <section class="tpl-group">
-      <h2 class="tpl-head">Day 1</h2>
-      ${emailRow('team_announcement')}
       ${fileRow('info_form')}
-      ${orgChartRow()}
+      ${fileRow('systems_checklist')}
     </section>
     <section class="tpl-group">
-      <h2 class="tpl-head">Managers</h2>
-      ${emailRow('manager_briefing')}
+      <h2 class="tpl-head">Org charts</h2>
+      ${ORG_CHART_SLUGS.map(orgChartRow).join('')}
     </section>
     <section class="tpl-group">
-      <h2 class="tpl-head">End of probation</h2>
+      <h2 class="tpl-head">KPI tools</h2>
+      ${fileRow('kpi_plan_tool')}
+    </section>
+    <section class="tpl-group">
+      <h2 class="tpl-head">Emails and survey</h2>
+      ${fileRow('email_templates_doc')}
       ${surveyRow()}
     </section>
   `;
@@ -209,17 +194,6 @@ async function downloadFile(slug){
     a.remove();
   }catch(e){
     showToast('Could not download, try again');
-  }
-}
-
-async function copyEmailTemplate(slug){
-  const tpl = emailTemplates[slug];
-  if(!tpl){ showToast('No template saved yet'); return; }
-  try{
-    await navigator.clipboard.writeText('Subject: ' + tpl.subject + '\n\n' + tpl.body);
-    showToast('Copied. Paste it into Outlook');
-  }catch(e){
-    showToast('Could not copy, select the text manually');
   }
 }
 
@@ -296,8 +270,6 @@ async function boot(){
   if(!requireAccessKeyOrRedirect()) return;
   document.getElementById('whoLabel').textContent = currentUserLabel();
   try{
-    const res = await apiFetch('/email-templates');
-    if(res.ok) emailTemplates = await res.json();
     await Promise.all([loadFiles(), loadLinks(), loadManagers()]);
     renderGroups();
     renderManagers();

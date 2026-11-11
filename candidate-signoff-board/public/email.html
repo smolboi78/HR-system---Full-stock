@@ -64,11 +64,6 @@ textarea#body{font:inherit;font-size:16px;line-height:1.5;padding:14px 16px;bord
 
 <script src="shared.js"></script>
 <script>
-const TEMPLATE_KEY_BY_ITEM = {
-  1: 'kpi_request', 3: 'laptop_sim', 5: 'welcome', 6: 'day_before', 8: 'team_announcement',
-  18: 'month1_checkin', 19: 'month2_checkin', 20: 'eval_report_request', 23: 'feedback_survey',
-};
-
 function qs(name){ return new URLSearchParams(window.location.search).get(name); }
 function formatDayDate(iso){
   if(!iso) return '';
@@ -87,14 +82,15 @@ function fillPlaceholders(text, hire){
     .split('[Survey link]').join('[Survey link: paste the Jotform link from Templates]');
 }
 
-let hireId, itemId, item, hire;
+let hireId, itemId, tplKey, item, hire;
 
 async function boot(){
   if(!requireAccessKeyOrRedirect()) return;
   document.getElementById('whoLabel').textContent = currentUserLabel();
 
   hireId = qs('hireId');
-  itemId = qs('itemId');
+  itemId = qs('itemId'); // absent for the feedback survey, which isn't a checklist item
+  tplKey = qs('tplKey');
   document.getElementById('backLink').href = 'hire.html?id=' + hireId;
   document.getElementById('backLink2').href = 'hire.html?id=' + hireId;
   document.getElementById('cancelLink').href = 'hire.html?id=' + hireId;
@@ -106,29 +102,35 @@ async function boot(){
     ]);
     if(!hireRes.ok) throw new Error('Request failed: ' + hireRes.status);
     hire = await hireRes.json();
-    item = hire.checklist.items.find(i => i.id === itemId);
-    if(!item){ document.body.innerHTML = '<p style="padding:40px;">Checklist item not found.</p>'; return; }
 
-    document.getElementById('itemLabel').textContent = 'Checklist item ' + item.n;
+    if(itemId){
+      item = hire.checklist.items.find(i => i.id === itemId);
+      if(!item){ document.body.innerHTML = '<p style="padding:40px;">Checklist item not found.</p>'; return; }
+      document.getElementById('itemLabel').textContent = 'Checklist item ' + item.n;
+    } else {
+      document.getElementById('itemLabel').textContent = 'After the checklist';
+    }
 
     const templates = templatesRes.ok ? await templatesRes.json() : {};
-    const key = TEMPLATE_KEY_BY_ITEM[item.n];
-    const tpl = key ? templates[key] : null;
-    const subject = tpl ? fillPlaceholders(tpl.subject, hire) : item.title;
+    const tpl = tplKey ? templates[tplKey] : null;
+    const fallbackTitle = item ? item.title : 'Feedback survey';
+    const subject = tpl ? fillPlaceholders(tpl.subject, hire) : fallbackTitle;
     const body = tpl ? fillPlaceholders(tpl.body, hire) : '[No template is set up for this item yet.]';
 
-    document.getElementById('emailTitle').textContent = tpl ? subject : item.title;
+    document.getElementById('emailTitle').textContent = tpl ? subject : fallbackTitle;
     document.getElementById('to').value = '';
     document.getElementById('subj').value = subject;
     document.getElementById('body').value = body;
 
-    if(item.n === 5){
+    if(item && item.n === 5){
       document.getElementById('attachmentsRow').style.display = 'flex';
       document.getElementById('scheduleAttachment').textContent = 'First week at Fullstock - ' + hire.name + '.pdf';
     }
 
-    if(item.done){
+    if(item && item.done){
       showSent('Checklist item ' + item.n + ' was already marked done' + (item.doneBy ? ' by ' + item.doneBy : '') + '.');
+    } else if(!item && hire.surveySentAt){
+      showSent('The feedback survey was already sent, on ' + new Date(hire.surveySentAt).toLocaleDateString() + '.');
     }
   }catch(e){
     showToast('Could not load this email, try again');
@@ -149,15 +151,25 @@ async function send(){
   window.location.href = mailto;
 
   try{
-    const res = await apiFetch('/checklist-items/' + itemId, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ done: true, actor: currentRole() === 'ceo' ? 'Reviewer' : 'HR' })
-    });
-    if(!res.ok) throw new Error('Request failed: ' + res.status);
-    showSent('Checklist item ' + item.n + ' is ticked automatically, with today\'s date and your name.');
+    if(itemId){
+      const res = await apiFetch('/checklist-items/' + itemId, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ done: true, actor: currentRole() === 'ceo' ? 'Reviewer' : 'HR' })
+      });
+      if(!res.ok) throw new Error('Request failed: ' + res.status);
+      showSent('Checklist item ' + item.n + ' is ticked automatically, with today\'s date and your name.');
+    } else {
+      const res = await apiFetch('/hires/' + hireId + '/survey-sent', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sent: true })
+      });
+      if(!res.ok) throw new Error('Request failed: ' + res.status);
+      showSent('The feedback survey is marked sent, and this hire has moved to Done.');
+    }
   }catch(e){
-    showToast('Opened Outlook, but could not mark the item done. Try ticking it on the checklist');
+    showToast('Opened Outlook, but could not mark this done. Try again from the checklist');
   }
 }
 

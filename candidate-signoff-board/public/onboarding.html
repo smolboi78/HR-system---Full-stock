@@ -119,8 +119,8 @@ function phaseLabel(hire){
   const today = todayIso();
   if(!hire.startDate) return 'Awaiting start date';
   if(today < hire.startDate) return 'Starting ' + formatDate(hire.startDate);
-  const m1 = hire.checklist.items.find(i => i.n === 18);
-  const m2 = hire.checklist.items.find(i => i.n === 19);
+  const m1 = hire.checklist.items.find(i => i.n === 20);
+  const m2 = hire.checklist.items.find(i => i.n === 21);
   if(m1 && today < m1.dueDate) return 'Month 1: Learn';
   if(m2 && today < m2.dueDate) return 'Month 2: Contribute';
   if(hire.probationEndDate && today < hire.probationEndDate) return 'Month 3: Evaluate';

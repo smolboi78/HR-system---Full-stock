@@ -263,6 +263,14 @@ db.exec(`
   );
 `);
 
+// Non-destructive migration for the hires table, same pattern as candidates
+// above. Added after hires already shipped, so it can't be in the CREATE
+// TABLE statement.
+const hiresColumns = db.prepare('PRAGMA table_info(hires)').all().map((c) => c.name);
+if (!hiresColumns.includes('surveySentAt')) {
+  db.exec('ALTER TABLE hires ADD COLUMN surveySentAt TEXT');
+}
+
 // Seed the editable manager list once, from the build brief. HR can edit it
 // afterward (never re-seeded once any manager row exists).
 if (db.prepare('SELECT COUNT(*) AS c FROM managers').get().c === 0) {
@@ -333,41 +341,35 @@ if (db.prepare('SELECT COUNT(*) AS c FROM email_templates').get().c === 0) {
   }
 }
 
-// Seed one active hire (per the build brief) so the Onboarding screens aren't
-// empty on first boot. Only runs once — any existing hire row skips it.
-if (db.prepare('SELECT COUNT(*) AS c FROM hires').get().c === 0) {
-  const hireId = crypto.randomUUID();
-  const startDate = '2026-10-11';
-  const offerSignedAt = '2026-09-15';
-  const { items, tightTimeline, probationEndDate } = computeChecklist(startDate, offerSignedAt, '10:30');
+// Two more templates named in the 11 Nov 2026 process (item 1 sends both a
+// KPI plan request and separate instructions for filling it in; item 2 is a
+// dedicated HyperOne new-hire-details request). Per-key insert, safe whether
+// or not earlier seeds already ran.
+{
+  const insertTemplateIfMissing = db.prepare('INSERT OR IGNORE INTO email_templates (key, subject, body, updatedAt) VALUES (?, ?, ?, ?)');
   const now = new Date().toISOString();
+  const DRAFT_NOTE = '[Draft placeholder: replace with Nesma\'s final text for this template.]';
+  [
+    ['kpi_howto', 'How to fill in the KPI plan for [First name]', DRAFT_NOTE + '\n\nHi [Manager name],\n\nHere\'s how to fill in the attached 30-60-90 KPI plan for [First name], starting [start date].'],
+    ['hyperone_request', 'New hire details: [First name]', DRAFT_NOTE + '\n\nHi Mr. Mohamed Reda,\n\nPlease find attached the signed offer for our new hire, [First name] ([Role]), starting [start date]. Could you set them up with a laptop and SIM?'],
+  ].forEach(([key, subject, body]) => insertTemplateIfMissing.run(key, subject, body, now));
+}
 
-  db.prepare(`
-    INSERT INTO hires
-      (id, candidateId, name, role, company, phase, archived, managerId, managerName, startDate, arrivalTime, offerSignedAt, probationEndDate, tightTimeline, createdAt)
-    VALUES
-      (@id, NULL, @name, @role, @company, 'active', 0, NULL, @managerName, @startDate, @arrivalTime, @offerSignedAt, @probationEndDate, @tightTimeline, @createdAt)
-  `).run({
-    id: hireId,
-    name: 'Hadeer Hassan',
-    role: 'Sales Supervisor, Greater Cairo',
-    company: 'Jammies',
-    managerName: 'Hesham Hamouda',
-    startDate,
-    arrivalTime: '10:30',
-    offerSignedAt,
-    probationEndDate,
-    tightTimeline: tightTimeline ? 1 : 0,
-    createdAt: now,
-  });
+// The real Jotform link for the feedback survey, now that the brief gives
+// one. Per-slug insert (never overwrites a link HR has since set herself).
+db.prepare('INSERT OR IGNORE INTO template_links (slug, url, updatedAt) VALUES (?, ?, ?)')
+  .run('feedback_survey', 'https://form.jotform.com/263112569721052', new Date().toISOString());
 
+// Writes a hire's checklist_items from a computeChecklist() result, marking
+// every item up to and including `doneUpTo` as done. Shared by the seed
+// helpers below (Hadeer's migration and Omer's fresh insert).
+function writeChecklistItems(hireId, items, doneUpTo, ownerFor) {
   const insertItem = db.prepare(`
     INSERT INTO checklist_items (id, hireId, n, stage, title, who, dueDate, dueNow, email, done, doneAt, doneBy, notes)
     VALUES (@id, @hireId, @n, @stage, @title, @who, @dueDate, @dueNow, @email, @done, @doneAt, @doneBy, NULL)
   `);
-  const ownerFor = (n) => (n === 13 || n === 16 ? 'Hesham Hamouda' : n === 14 ? 'Hadeer Hassan' : 'HR');
   for (const item of items) {
-    const isDone = item.n <= 17; // items 1-17 done, 18 (Month 1 check-in) left overdue
+    const isDone = item.n <= doneUpTo;
     insertItem.run({
       id: crypto.randomUUID(),
       hireId,
@@ -377,11 +379,67 @@ if (db.prepare('SELECT COUNT(*) AS c FROM hires').get().c === 0) {
       who: item.who,
       dueDate: item.dueDate,
       dueNow: item.dueNow ? 1 : 0,
-      email: item.email,
+      email: JSON.stringify(item.emails),
       done: isDone ? 1 : 0,
       doneAt: isDone ? item.dueDate + 'T12:00:00.000Z' : null,
       doneBy: isDone ? ownerFor(item.n) : null,
     });
+  }
+}
+
+// Seed data per the build brief agreed 11 Nov 2026. Runs on every boot but is
+// self-limiting: Hadeer's checklist is only rebuilt if it's still in the
+// shape an earlier version of this seed left it in (21 items is the current
+// shape), and Omer is only inserted if no hire of that name exists yet — so
+// this never touches a checklist a real PATCH call has since changed shape,
+// and never re-inserts Omer once he exists.
+{
+  const hadeer = db.prepare("SELECT * FROM hires WHERE name = 'Hadeer Hassan'").get();
+  const hadeerOwnerFor = (n) => (n === 14 || n === 16 ? 'Hesham Hamouda' : n === 15 ? 'Hadeer Hassan' : 'HR');
+  if (!hadeer) {
+    const hireId = crypto.randomUUID();
+    const startDate = '2026-10-11';
+    const offerSignedAt = '2026-09-15';
+    const { items, tightTimeline, probationEndDate } = computeChecklist(startDate, offerSignedAt, '10:30');
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO hires
+        (id, candidateId, name, role, company, phase, archived, managerId, managerName, startDate, arrivalTime, offerSignedAt, probationEndDate, tightTimeline, createdAt)
+      VALUES
+        (@id, NULL, @name, @role, @company, 'active', 0, NULL, @managerName, @startDate, @arrivalTime, @offerSignedAt, @probationEndDate, @tightTimeline, @createdAt)
+    `).run({
+      id: hireId, name: 'Hadeer Hassan', role: 'Sales Supervisor, Greater Cairo', company: 'Jammies',
+      managerName: 'Hesham Hamouda', startDate, arrivalTime: '10:30', offerSignedAt, probationEndDate,
+      tightTimeline: tightTimeline ? 1 : 0, createdAt: now,
+    });
+    writeChecklistItems(hireId, items, 19, hadeerOwnerFor); // items 1-19 done, 20 (Month 1 check-in) left overdue
+  } else {
+    const currentItemCount = db.prepare('SELECT COUNT(*) AS c FROM checklist_items WHERE hireId = ?').get(hadeer.id).c;
+    if (currentItemCount !== 21) {
+      const { items } = computeChecklist(hadeer.startDate, hadeer.offerSignedAt.slice(0, 10), hadeer.arrivalTime);
+      db.prepare('DELETE FROM checklist_items WHERE hireId = ?').run(hadeer.id);
+      writeChecklistItems(hadeer.id, items, 19, hadeerOwnerFor);
+    }
+  }
+
+  if (!db.prepare("SELECT 1 FROM hires WHERE name = 'Omer Abdelaziz'").get()) {
+    const hireId = crypto.randomUUID();
+    const startDate = '2026-11-09';
+    const offerSignedAt = '2026-10-20';
+    const { items, tightTimeline, probationEndDate } = computeChecklist(startDate, offerSignedAt, '10:30');
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO hires
+        (id, candidateId, name, role, company, phase, archived, managerId, managerName, startDate, arrivalTime, offerSignedAt, probationEndDate, tightTimeline, createdAt)
+      VALUES
+        (@id, NULL, @name, @role, @company, 'active', 0, NULL, @managerName, @startDate, @arrivalTime, @offerSignedAt, @probationEndDate, @tightTimeline, @createdAt)
+    `).run({
+      id: hireId, name: 'Omer Abdelaziz', role: 'Executive Associate', company: 'Fullstock',
+      managerName: 'Hesham Hamouda', startDate, arrivalTime: '10:30', offerSignedAt, probationEndDate,
+      tightTimeline: tightTimeline ? 1 : 0, createdAt: now,
+    });
+    // "Before Day 1 and Day 1 done" = items 1-15.
+    writeChecklistItems(hireId, items, 15, (n) => (n === 14 ? 'Hesham Hamouda' : n === 15 ? 'Omer Abdelaziz' : 'HR'));
   }
 }
 
@@ -490,11 +548,24 @@ function getChecklistItems(hireId) {
   return db.prepare('SELECT * FROM checklist_items WHERE hireId = ? ORDER BY n ASC').all(hireId);
 }
 
+function parseItemEmails(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
 function rowToHire(row, items) {
   const total = items.length;
   const done = items.filter((i) => i.done).length;
   const todayIso = new Date().toISOString().slice(0, 10);
   const overdue = items.filter((i) => !i.done && i.dueDate < todayIso).length;
+  const milestones = (row.startDate && row.offerSignedAt)
+    ? computeChecklist(row.startDate, row.offerSignedAt.slice(0, 10), row.arrivalTime).milestones
+    : null;
   return {
     id: row.id,
     candidateId: row.candidateId || null,
@@ -514,6 +585,8 @@ function rowToHire(row, items) {
     tightTimeline: !!row.tightTimeline,
     notes: row.notes || '',
     createdAt: row.createdAt,
+    surveySentAt: row.surveySentAt || null,
+    milestones,
     checklist: {
       total,
       done,
@@ -526,7 +599,7 @@ function rowToHire(row, items) {
         who: it.who,
         dueDate: it.dueDate,
         dueNow: !!it.dueNow,
-        email: it.email || null,
+        emails: parseItemEmails(it.email),
         done: !!it.done,
         doneAt: it.doneAt || null,
         doneBy: it.doneBy || null,
@@ -892,7 +965,10 @@ app.get('/email-templates', (req, res) => {
   res.json(byKey);
 });
 
-const TEMPLATE_FILE_SLUGS = ['org_chart', 'kpi_plan_tool', 'kpi_plan_blank', 'documents_checklist', 'first_week_schedule', 'info_form'];
+const TEMPLATE_FILE_SLUGS = [
+  'process_summary', 'attendance_policy', 'org_chart_fullstock', 'org_chart_jammies', 'work_locations',
+  'documents_checklist', 'info_form', 'systems_checklist', 'email_templates_doc', 'kpi_plan_tool',
+];
 
 app.get('/template-files', (req, res) => {
   const rows = db.prepare('SELECT slug, fileName, uploadedAt, uploadedBy FROM template_files').all();
@@ -1079,15 +1155,26 @@ app.patch('/checklist-items/:id', (req, res) => {
   db.prepare('UPDATE checklist_items SET done = ?, doneAt = ?, doneBy = ? WHERE id = ?')
     .run(done ? 1 : 0, done ? now : null, done ? actor : null, item.id);
 
-  // The Onboarding "Done" section is driven by the feedback survey (item 23)
-  // being sent, per the brief ("Hires move here once their probation
-  // decision is made and the feedback survey is sent").
-  if (item.n === 23) {
-    db.prepare('UPDATE hires SET phase = ? WHERE id = ?').run(done ? 'done' : 'active', item.hireId);
-  }
-
   const updated = db.prepare('SELECT * FROM hires WHERE id = ?').get(item.hireId);
   res.json(rowToHire(updated, getChecklistItems(item.hireId)));
+});
+
+// The feedback survey isn't a numbered checklist item (it's one of the
+// milestones "shown as dates on the hire card"), so sending it is its own
+// action rather than a checklist-item toggle. Per the brief, "Hires move
+// [to Done] once their probation decision is made and the feedback survey
+// is sent" — this is what actually moves the phase to 'done'.
+app.patch('/hires/:id/survey-sent', (req, res) => {
+  const hire = db.prepare('SELECT * FROM hires WHERE id = ?').get(req.params.id);
+  if (!hire) {
+    return res.status(404).json({ error: 'Hire not found' });
+  }
+  const sent = !!(req.body || {}).sent;
+  const now = new Date().toISOString();
+  db.prepare('UPDATE hires SET surveySentAt = ?, phase = ? WHERE id = ?')
+    .run(sent ? now : null, sent ? 'done' : 'active', hire.id);
+  const updated = db.prepare('SELECT * FROM hires WHERE id = ?').get(hire.id);
+  res.json(rowToHire(updated, getChecklistItems(hire.id)));
 });
 
 app.listen(PORT, () => {

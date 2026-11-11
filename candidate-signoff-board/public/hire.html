@@ -67,10 +67,20 @@
         <div id="dDecision" style="padding:10px 12px;background:var(--active-bg);border-radius:8px;font-weight:700;"></div>
       </section>
       <section class="side-section">
+        <h2 style="margin:0 0 4px;font-size:18px;">After the checklist</h2>
+        <div><span style="color:var(--muted);">Probation evaluation report due</span><br><b id="mEval"></b></div>
+        <div><span style="color:var(--muted);">Joint decision due</span><br><b id="mDecision"></b></div>
+        <div>
+          <span style="color:var(--muted);">Feedback survey</span><br>
+          <b id="mSurveyStatus"></b>
+        </div>
+        <a href="#" id="surveySendLink" class="btn" style="padding:8px 14px;min-height:36px;font-size:14px;align-self:flex-start;">Send survey</a>
+      </section>
+      <section class="side-section">
         <h2 style="margin:0 0 4px;font-size:18px;">Files</h2>
         <span style="color:var(--muted);">30-60-90 KPI plan</span>
         <span style="color:var(--muted);">Info form and scanned documents</span>
-        <span style="color:var(--muted);">First-week schedule</span>
+        <span style="color:var(--muted);">Signed contract and systems checklist</span>
         <p style="margin:0;font-size:13px;color:var(--muted);">Not stored here yet. See Templates for the blank forms.</p>
       </section>
       <section class="side-section">
@@ -107,8 +117,8 @@ function phaseLabel(h){
   const today = todayIso();
   if(!h.startDate) return 'Awaiting start date';
   if(today < h.startDate) return 'Starting ' + formatDate(h.startDate);
-  const m1 = h.checklist.items.find(i => i.n === 18);
-  const m2 = h.checklist.items.find(i => i.n === 19);
+  const m1 = h.checklist.items.find(i => i.n === 20);
+  const m2 = h.checklist.items.find(i => i.n === 21);
   if(m1 && today < m1.dueDate) return 'Month 1: Learn';
   if(m2 && today < m2.dueDate) return 'Month 2: Contribute';
   if(h.probationEndDate && today < h.probationEndDate) return 'Month 3: Evaluate';
@@ -118,13 +128,14 @@ function phaseLabel(h){
 const STAGE_SUBS = {
   'Before Day 1': 'Starts when the offer is signed',
   'Day 1': null, // filled with the real arrival time once we know it
-  'First week': null,
-  'Probation': 'Months 1 to 3',
+  'Day 2': null,
+  'Day 5': null,
+  'Monthly check-ins': 'End of Month 1 and Month 2',
 };
 
 function renderGroups(){
   const today = todayIso();
-  const stages = ['Before Day 1', 'Day 1', 'First week', 'Probation'];
+  const stages = ['Before Day 1', 'Day 1', 'Day 2', 'Day 5', 'Monthly check-ins'];
   const html = stages.map((stage) => {
     const items = hire.checklist.items.filter(i => i.stage === stage);
     if(!items.length) return '';
@@ -133,8 +144,8 @@ function renderGroups(){
     if(stage === 'Day 1' && hire.startDate){
       sub = formatDate(hire.startDate).replace(/, \d{4}$/, '') + ', ' + formatTime(hire.arrivalTime);
     }
-    if(stage === 'First week' && hire.startDate){
-      sub = 'The week of ' + formatDate(hire.startDate).replace(/, \d{4}$/, '');
+    if((stage === 'Day 2' || stage === 'Day 5') && items[0]){
+      sub = formatDate(items[0].dueDate).replace(/, \d{4}$/, '');
     }
     return `
     <section class="group">
@@ -147,6 +158,9 @@ function renderGroups(){
         const late = !it.done && it.dueDate < today;
         const status = it.done ? 'Done' : (late ? 'Overdue' : 'Upcoming');
         const pillClass = it.done ? 'done' : (late ? 'overdue' : 'neutral');
+        const emailButtons = (it.emails || []).map((em) =>
+          `<a href="email.html?hireId=${hire.id}&itemId=${it.id}&tplKey=${encodeURIComponent(em.key)}" style="font-size:14px;font-weight:700;padding:8px 12px;border:1px solid var(--border-strong);border-radius:8px;">${escapeHtml(em.label)}</a>`
+        ).join('');
         return `
         <div class="item-row">
           <label>
@@ -157,7 +171,7 @@ function renderGroups(){
           <span class="item-who">${escapeHtml(it.who)}</span>
           <span class="item-due" style="color:${late ? 'var(--overdue-fg)' : 'var(--muted)'};">${formatDate(it.dueDate).replace(/, \d{4}$/, '')}${it.dueNow ? ' (due now)' : ''}</span>
           <span class="pill ${pillClass}" style="width:84px;text-align:center;">${status}</span>
-          ${it.email ? `<a href="email.html?hireId=${hire.id}&itemId=${it.id}" style="font-size:14px;font-weight:700;padding:8px 12px;border:1px solid var(--border-strong);border-radius:8px;">${escapeHtml(it.email)}</a>` : ''}
+          ${emailButtons}
         </div>`;
       }).join('')}
     </section>`;
@@ -189,6 +203,16 @@ function renderHeader(){
   document.getElementById('dProbation').textContent = formatDate(hire.probationEndDate);
   const daysLeft = hire.probationEndDate ? Math.ceil((new Date(hire.probationEndDate + 'T00:00:00Z').getTime() - Date.now()) / 86400000) : null;
   document.getElementById('dDecision').textContent = daysLeft === null ? '' : daysLeft > 0 ? daysLeft + ' days left to decide' : 'Decision is due';
+
+  const m = hire.milestones;
+  document.getElementById('mEval').textContent = m ? formatDate(m.probationEvalDate) : 'Not set';
+  document.getElementById('mDecision').textContent = m ? formatDate(m.probationEndDate) : 'Not set';
+  document.getElementById('mSurveyStatus').textContent = hire.surveySentAt
+    ? 'Sent ' + new Date(hire.surveySentAt).toLocaleDateString()
+    : 'Not sent yet';
+  const surveyLink = document.getElementById('surveySendLink');
+  surveyLink.href = 'email.html?hireId=' + hire.id + '&tplKey=feedback_survey';
+  surveyLink.textContent = hire.surveySentAt ? 'Already sent, send again' : 'Send survey';
 
   document.getElementById('notes').value = hire.notes || '';
 }
