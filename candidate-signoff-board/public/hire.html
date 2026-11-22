@@ -61,7 +61,7 @@
       <section class="side-section">
         <h2 style="margin:0 0 4px;font-size:18px;">Details</h2>
         <div><span style="color:var(--muted);">Direct manager</span><br><b id="dManager"></b></div>
-        <div><span style="color:var(--muted);">Start date</span><br><b id="dStart"></b></div>
+        <div><span style="color:var(--muted);">Start date</span><br><b id="dStart"></b> <a href="#" id="changeStartLink" style="font-size:13px;color:var(--link);margin-left:6px;">Change</a><span id="changeStartBox" style="display:none;"><br><input type="date" id="newStartDate" style="font:inherit;padding:4px 6px;margin-top:4px;"> <button type="button" id="saveStartBtn" style="font:inherit;padding:4px 10px;cursor:pointer;">Save</button> <a href="#" id="cancelStartLink" style="font-size:13px;color:var(--muted);">Cancel</a></span></div>
         <div><span style="color:var(--muted);">Current phase</span><br><b id="dPhase"></b></div>
         <div><span style="color:var(--muted);">Probation ends</span><br><b id="dProbation"></b></div>
         <div id="dDecision" style="padding:10px 12px;background:var(--active-bg);border-radius:8px;font-weight:700;"></div>
@@ -264,6 +264,20 @@ async function load(){
 }
 
 document.getElementById('saveNotesBtn').addEventListener('click', saveNotes);
+document.getElementById('changeStartLink').addEventListener('click', (e) => { e.preventDefault(); document.getElementById('newStartDate').value = hire.startDate || ''; document.getElementById('changeStartBox').style.display = 'inline'; });
+document.getElementById('cancelStartLink').addEventListener('click', (e) => { e.preventDefault(); document.getElementById('changeStartBox').style.display = 'none'; });
+document.getElementById('saveStartBtn').addEventListener('click', async () => {
+  const v = document.getElementById('newStartDate').value;
+  if(!v){ showToast('Pick a start date first'); return; }
+  try{
+    const res = await apiFetch('/hires/' + hire.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ startDate: v }) });
+    if(!res.ok) throw new Error('Request failed: ' + res.status);
+    hire = await res.json();
+    document.getElementById('changeStartBox').style.display = 'none';
+    renderHeader(); renderGroups();
+    showToast('Start date changed, due dates updated');
+  }catch(e){ showToast('Could not change the start date, try again'); }
+});
 document.getElementById('logoutLink').addEventListener('click', (e) => { e.preventDefault(); clearAccessKey(); window.location.href = 'index.html'; });
 
 async function boot(){

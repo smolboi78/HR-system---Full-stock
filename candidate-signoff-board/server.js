@@ -1057,9 +1057,29 @@ app.get('/hires/:id', (req, res) => {
 app.patch('/hires/:id', (req, res) => {
   const hire = db.prepare('SELECT * FROM hires WHERE id = ?').get(req.params.id);
   if (!hire) return res.status(404).json({ error: 'Hire not found' });
-  const { notes } = req.body || {};
+  const { notes, startDate, arrivalTime } = req.body || {};
   if (notes !== undefined) {
     db.prepare('UPDATE hires SET notes = ? WHERE id = ?').run(notes ? String(notes) : null, hire.id);
+  }
+  // Change the start date (and optionally the arrival time) of a hire whose
+  // offer is already signed. Due dates, emails and probation end are
+  // recalculated; ticks, notes and who-did-it on each step are kept.
+  if (startDate !== undefined || arrivalTime !== undefined) {
+    if (hire.phase === 'awaiting_offer' || !hire.offerSignedAt) {
+      return res.status(400).json({ error: 'Set the start date when marking the offer as signed.' });
+    }
+    const newStart = startDate !== undefined ? startDate : hire.startDate;
+    if (!newStart || !/^\d{4}-\d{2}-\d{2}$/.test(newStart)) {
+      return res.status(400).json({ error: 'A valid start date (YYYY-MM-DD) is required.' });
+    }
+    const newArrival = arrivalTime !== undefined && /^\d{2}:\d{2}$/.test(arrivalTime) ? arrivalTime : (hire.arrivalTime || '10:30');
+    const { items, tightTimeline, probationEndDate } = computeChecklist(newStart, hire.offerSignedAt.slice(0, 10), newArrival);
+    const updItem = db.prepare('UPDATE checklist_items SET dueDate = ?, dueNow = ?, email = ? WHERE hireId = ? AND n = ?');
+    db.prepare('UPDATE hires SET startDate = ?, arrivalTime = ?, probationEndDate = ?, tightTimeline = ? WHERE id = ?')
+      .run(newStart, newArrival, probationEndDate, tightTimeline ? 1 : 0, hire.id);
+    for (const item of items) {
+      updItem.run(item.dueDate, item.dueNow ? 1 : 0, JSON.stringify(item.emails), hire.id, item.n);
+    }
   }
   const updated = db.prepare('SELECT * FROM hires WHERE id = ?').get(hire.id);
   res.json(rowToHire(updated, getChecklistItems(hire.id)));
