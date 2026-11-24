@@ -20,6 +20,30 @@
   var CHEVRON = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
   var XICON = '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
+  var GRIP = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+  var UP = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>';
+  var DOWN = '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+
+  // Shortlisted candidates in rank order; anyone not ranked yet goes last, oldest first.
+  function rankSort(list) {
+    return list.slice().sort(function (a, b) {
+      var ra = a.shortlistRank == null ? Infinity : a.shortlistRank;
+      var rb = b.shortlistRank == null ? Infinity : b.shortlistRank;
+      if (ra !== rb) return ra - rb;
+      return String(a.createdAt).localeCompare(String(b.createdAt));
+    });
+  }
+  function saveRank(jobId, ids) {
+    ids.forEach(function (id, i) { var c = candById(id); if (c) c.shortlistRank = i + 1; });
+    render();
+    api('PUT', '/api/jobs/' + jobId + '/shortlist-order', { order: ids })
+      .then(function () { toast('Ranking saved'); })
+      .catch(function (err) { toast(err.message); load(); });
+  }
+  function shortlistIds(jobId) {
+    return rankSort(candsFor(jobId).filter(COLS[2].test)).map(function (c) { return c.id; });
+  }
+
   var state = { role: null, jobs: [], candidates: [], filter: 'all', open: null };
   var app = document.getElementById('app');
   var modal = document.getElementById('modal');
@@ -211,21 +235,35 @@
   function panelRow(j, cands) {
     var col = COLS.filter(function (c) { return c.key === state.open.col; })[0];
     var list = cands.filter(col.test);
+    var ranking = col.key === 'sl';
+    if (ranking) list = rankSort(list);
+    var canDrag = ranking && isAdmin() && list.length > 1;
     var h = '<tr><td colspan="6" class="panelcell"><div class="panel"><div class="ph"><h3>' + esc(col.label + ' · ' + j.title + ' (' + list.length + ')') + '</h3><div class="tabs">';
     if (isAdmin()) h += '<button class="btn small" data-a="new-cand" data-id="' + j.id + '">+ Add candidate</button>';
     h += '<button class="btn small ghost" data-a="close">Close</button></div></div><div class="list"><div class="tablebox"><div style="min-width:820px">' +
       '<div class="lrow hdr"><span>Name</span><span>Interview date</span><span>Technical</span><span>Behavioral</span><span>Comment</span><span></span></div><div class="lscroll">';
     if (!list.length) h += '<div class="empty">No candidates here yet.</div>';
-    list.forEach(function (c) {
+    list.forEach(function (c, idx) {
       var pe = primaryEval(c);
-      h += '<div class="lrow"><div><div class="nm">' + esc(c.name) + '</div><div class="nmsub">' + (c.source === 'messaged' ? 'Messaged' : 'Applied') + ' · ' + esc(STAGE_LABEL[c.stage]) + '</div></div>' +
+      var rankBits = '';
+      if (ranking) {
+        rankBits = '<span class="rank">#' + (idx + 1) + '</span>';
+        if (canDrag) {
+          rankBits = '<span class="grip" aria-hidden="true">' + GRIP + '</span>' + rankBits +
+            '<span class="mv"><button type="button" class="mvbtn" data-a="rank-up" data-id="' + c.id + '" data-job="' + j.id + '" aria-label="Move ' + esc(c.name) + ' up"' + (idx === 0 ? ' disabled' : '') + '>' + UP + '</button>' +
+            '<button type="button" class="mvbtn" data-a="rank-down" data-id="' + c.id + '" data-job="' + j.id + '" aria-label="Move ' + esc(c.name) + ' down"' + (idx === list.length - 1 ? ' disabled' : '') + '>' + DOWN + '</button></span>';
+        }
+      }
+      h += '<div class="lrow' + (ranking ? ' ranked' : '') + '"' + (canDrag ? ' draggable="true" data-drag="' + c.id + '" data-job="' + j.id + '"' : '') + '><div class="nmcell">' + rankBits + '<div><div class="nm">' + esc(c.name) + '</div><div class="nmsub">' + (c.source === 'messaged' ? 'Messaged' : 'Applied') + ' · ' + esc(STAGE_LABEL[c.stage]) + '</div></div></div>' +
         '<span>' + (c.interviewDateTime ? fmtDate(c.interviewDateTime) : '<span class="muted">Not interviewed</span>') + '</span>' +
         '<span>' + (pe ? scoreHtml(pe.techScore, pe.techMax) : scoreHtml(null)) + '</span>' +
         '<span>' + (pe ? scoreHtml(pe.behScore, pe.behMax) : scoreHtml(null)) + '</span>' +
         '<span class="cmt" title="' + esc(c.decision || '') + '">' + (c.decision ? esc(c.decision) : '<span class="muted">-</span>') + '</span>' +
         '<button class="more" data-a="more" data-id="' + c.id + '">More</button></div>';
     });
-    h += '</div></div></div></div></div></td></tr>';
+    h += '</div></div></div></div>';
+    if (canDrag) h += '<p class="hint" style="margin:0 0 6px">Drag the shortlisted candidates (or use the arrows) to rank them. #1 is the top choice.</p>';
+    h += '</div></td></tr>';
     return h;
   }
 
@@ -410,6 +448,17 @@
     if (a === 'more') { openDetail(id); return; }
     if (a === 'file') { openFile(id, t.getAttribute('data-kind')); return; }
     if (!isAdmin()) return;
+    if (a === 'rank-up' || a === 'rank-down') {
+      var jid = t.getAttribute('data-job');
+      var ids = shortlistIds(jid);
+      var i = ids.indexOf(id);
+      var k = a === 'rank-up' ? i - 1 : i + 1;
+      if (i < 0 || k < 0 || k >= ids.length) return;
+      ids.splice(i, 1); ids.splice(k, 0, id);
+      saveRank(jid, ids);
+      setTimeout(function () { var b = document.querySelector('[data-a="' + a + '"][data-id="' + id + '"]'); if (b && !b.disabled) b.focus(); }, 0);
+      return;
+    }
     if (a === 'new-job') openJobForm(null);
     else if (a === 'edit-job') openJobForm(id);
     else if (a === 'new-cand') openCandForm(null, id);
@@ -436,6 +485,47 @@
       }).catch(function (err) { toast(err.message); load(); });
     }
   });
+  // Drag and drop ranking (mouse). Arrow buttons cover keyboard and touch.
+  var dragId = null;
+  document.addEventListener('dragstart', function (e) {
+    var row = e.target.closest && e.target.closest('[data-drag]');
+    if (!row) return;
+    dragId = row.getAttribute('data-drag');
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', dragId); } catch (err) { /* ignore */ }
+  });
+  document.addEventListener('dragover', function (e) {
+    if (!dragId) return;
+    var row = e.target.closest && e.target.closest('[data-drag]');
+    if (!row) return;
+    e.preventDefault();
+    var r = row.getBoundingClientRect();
+    var after = e.clientY > r.top + r.height / 2;
+    document.querySelectorAll('.drop-before,.drop-after').forEach(function (x) { x.classList.remove('drop-before', 'drop-after'); });
+    if (row.getAttribute('data-drag') !== dragId) row.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+  document.addEventListener('drop', function (e) {
+    if (!dragId) return;
+    var row = e.target.closest && e.target.closest('[data-drag]');
+    if (!row) return;
+    e.preventDefault();
+    var target = row.getAttribute('data-drag');
+    var jid = row.getAttribute('data-job');
+    var after = row.classList.contains('drop-after');
+    var moving = dragId;
+    dragId = null;
+    if (target === moving) { render(); return; }
+    var ids = shortlistIds(jid).filter(function (x) { return x !== moving; });
+    var k = ids.indexOf(target) + (after ? 1 : 0);
+    ids.splice(k, 0, moving);
+    saveRank(jid, ids);
+  });
+  document.addEventListener('dragend', function () {
+    dragId = null;
+    document.querySelectorAll('.dragging,.drop-before,.drop-after').forEach(function (x) { x.classList.remove('dragging', 'drop-before', 'drop-after'); });
+  });
+
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.innerHTML) modal.innerHTML = ''; });
 
   // ---------- start ----------

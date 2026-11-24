@@ -76,6 +76,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_eval_cand ON evaluations(candidateId);
 `);
 
+// Non-destructive migrations for columns added after launch.
+const candCols = db.prepare('PRAGMA table_info(candidates)').all().map((c) => c.name);
+if (!candCols.includes('shortlistRank')) db.exec('ALTER TABLE candidates ADD COLUMN shortlistRank INTEGER');
+
 const now = () => new Date().toISOString();
 const newId = () => crypto.randomUUID();
 const str = (v) => (v === undefined || v === null ? null : String(v).trim() || null);
@@ -87,7 +91,7 @@ const num = (v) => {
 
 const JOB_COLS = 'id, title, department, location, hiringManager, dateOpened, status, archived, createdAt, updatedAt';
 const CAND_COLS = `id, jobId, name, phone, email, source, linkedinUrl, notes, stage, interviewDateTime, decision,
-  primaryInterviewer, cvFileName, reportFileName, archived, createdAt, updatedAt,
+  primaryInterviewer, shortlistRank, cvFileName, reportFileName, archived, createdAt, updatedAt,
   (cvBase64 IS NOT NULL) AS hasCv, (reportBase64 IS NOT NULL) AS hasReport`;
 
 function jobOut(r) {
@@ -266,6 +270,16 @@ app.patch('/api/candidates/:id', (req, res) => {
 });
 
 // Replace a candidate's interviewer scores in one go (from a scorecard report).
+// Rank a job's shortlisted candidates: body { order: [candidateId, ...] }, first = #1.
+app.put('/api/jobs/:id/shortlist-order', (req, res) => {
+  if (!db.prepare('SELECT id FROM jobs WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Job not found.' });
+  const order = Array.isArray((req.body || {}).order) ? req.body.order : null;
+  if (!order) return res.status(400).json({ error: 'order must be a list of candidate ids.' });
+  const upd = db.prepare('UPDATE candidates SET shortlistRank = ? WHERE id = ? AND jobId = ?');
+  order.forEach((cid, i) => upd.run(i + 1, String(cid), req.params.id));
+  res.json({ ok: true });
+});
+
 app.put('/api/candidates/:id/evaluations', (req, res) => {
   if (!db.prepare('SELECT id FROM candidates WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Candidate not found.' });
   replaceEvaluations(req.params.id, (req.body || {}).evaluations);
