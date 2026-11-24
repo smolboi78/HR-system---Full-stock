@@ -222,10 +222,6 @@
       var n = cands.filter(col.test).length;
       var active = isOpen && state.open.col === col.key;
       h += '<td class="c"><button class="count' + (col.key === 'rej' ? ' rej' : '') + '" data-a="cell" data-id="' + j.id + '" data-col="' + col.key + '" aria-expanded="' + active + '" aria-label="' + esc(col.label + ' for ' + j.title + ': ' + n) + '"><span>' + n + '</span>' + CHEVRON + '</button>';
-      if (col.key === 'all') {
-        var m = cands.filter(function (c) { return c.source === 'messaged'; }).length;
-        h += '<div class="sub">' + (n - m) + ' applied · ' + m + ' msg</div>';
-      }
       h += '</td>';
     });
     h += '</tr>';
