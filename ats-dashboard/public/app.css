@@ -80,7 +80,7 @@ td.panelcell{padding:0 0 14px !important;background:#F0FAFE}
 .panel .ph{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
 .panel .ph h3{font-size:15px}
 .list{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
-.lrow{display:grid;grid-template-columns:minmax(220px,1.4fr) 150px 110px 110px minmax(180px,2fr) 84px;gap:12px;padding:10px 14px;align-items:center;border-bottom:1px solid var(--line2)}
+.lrow{display:grid;grid-template-columns:minmax(220px,1.4fr) 150px 110px 110px minmax(180px,2fr) 172px;gap:12px;padding:10px 14px;align-items:center;border-bottom:1px solid var(--line2)}
 .lrow:last-child{border-bottom:0}
 .lrow.hdr{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
 .lscroll{max-height:380px;overflow-y:auto}
@@ -89,9 +89,19 @@ td.panelcell{padding:0 0 14px !important;background:#F0FAFE}
 .cmt{color:var(--soft);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .empty{padding:18px 14px;color:var(--muted)}
 .score{display:inline-block;padding:3px 8px;border-radius:6px;font-weight:700;font-size:13px}
-.score.hi{background:var(--ink);color:#fff}
-.score.mid{background:var(--sky2);color:var(--deep)}
-.score.lo{background:var(--warn-bg);color:var(--warn-fg)}
+.score.g{background:#D7F2DF;color:#11592A}
+.score.y{background:#FFF0B8;color:#5E4700}
+.score.r{background:#FDE0DE;color:#9B1C1C}
+.score.n{background:var(--bg);color:var(--soft)}
+.raw{display:block;font-size:11px;color:var(--muted);margin-top:3px}
+.acts{display:flex;gap:6px;justify-content:flex-end}
+.rejbtn{height:36px;padding:0 12px;border-radius:8px;font-size:13px;font-weight:600;background:#fff;color:#9B1C1C;border:1px solid #F2B8B5}
+.rejbtn:hover{background:#FDE0DE}
+.mini.hero.g{background:#D7F2DF;border-color:#A8DDB7}
+.mini.hero.y{background:#FFF0B8;border-color:#F0D670}
+.mini.hero.r{background:#FDE0DE;border-color:#F2B8B5}
+.mini.hero .l,.mini.hero .s{color:var(--soft)}
+.mini .s{font-size:12px}
 .score.na{color:var(--muted);font-weight:500;padding:0}
 .more{height:36px;padding:0 14px;border-radius:8px;font-size:13px;font-weight:600;background:var(--brand);border:0}
 

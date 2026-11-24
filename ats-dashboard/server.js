@@ -267,6 +267,8 @@ app.patch('/api/candidates/:id', (req, res) => {
     decision=?, primaryInterviewer=?, cvFileName=?, cvBase64=?, reportFileName=?, reportBase64=?, archived=?, updatedAt=? WHERE id=?`).run(
     next.jobId, next.name, next.phone, next.email, next.source, next.linkedinUrl, next.notes, next.stage, next.interviewDateTime,
     next.decision, next.primaryInterviewer, next.cvFileName, next.cvBase64, next.reportFileName, next.reportBase64, next.archived, now(), cur.id);
+  // Leaving the shortlist drops the candidate's rank so a later re-shortlist starts at the bottom.
+  if (next.stage !== 'shortlisted') db.prepare('UPDATE candidates SET shortlistRank = NULL WHERE id = ?').run(cur.id);
   if (Array.isArray(b.evaluations)) replaceEvaluations(cur.id, b.evaluations);
   res.json(getCandidate(cur.id));
 });

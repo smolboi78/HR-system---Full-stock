@@ -102,23 +102,22 @@
     var ev = c.evaluations || [];
     return ev.filter(function (e) { return String(e.interviewer || '').toLowerCase().indexOf(who) !== -1; })[0] || null;
   }
-  function scoreHtml(score, max) {
-    if (score == null) return '<span class="score na">-</span>';
-    var text = max ? (score + ' / ' + max) : String(score);
-    var pct = max ? score / max * 100 : score;
-    var cls = pct >= 80 ? 'hi' : (pct >= 65 ? 'mid' : 'lo');
-    return '<span class="score ' + cls + '" title="' + (max ? Math.round(pct) + '%' : '') + '">' + esc(text) + '</span>';
+  // Percentage of a score; null when there is no score.
+  function pctOf(score, max) {
+    if (score == null) return null;
+    return max ? score / max * 100 : score;
   }
-  function avg(list, sk, mk) {
-    var xs = list.filter(function (e) { return e[sk] != null; });
-    if (!xs.length) return '-';
-    var withMax = xs.filter(function (e) { return e[mk]; });
-    if (withMax.length === xs.length) {
-      var p = withMax.reduce(function (a, e) { return a + e[sk] / e[mk]; }, 0) / withMax.length * 100;
-      return Math.round(p) + '%';
-    }
-    return (Math.round(xs.reduce(function (a, e) { return a + e[sk]; }, 0) / xs.length * 10) / 10).toString();
+  // Colour bands for Hesham's scores: 90%+ green, 75-89% yellow, below 75% red.
+  function band(pct) { return pct >= 90 ? 'g' : (pct >= 75 ? 'y' : 'r'); }
+  // colored: true for Hesham's scores, false for the other interviewers (neutral).
+  function scoreHtml(score, max, colored) {
+    var pct = pctOf(score, max);
+    if (pct == null) return '<span class="score na">-</span>';
+    var raw = max ? score + ' / ' + max : '';
+    return '<span class="score ' + (colored ? band(pct) : 'n') + '"' + (raw ? ' title="' + esc(raw) + '"' : '') + '>' + Math.round(pct) + '%</span>' +
+      (raw ? '<span class="raw">' + esc(raw) + '</span>' : '');
   }
+
 
   // ---------- gate ----------
   function showGate(msg) {
@@ -253,10 +252,11 @@
       }
       h += '<div class="lrow' + (ranking ? ' ranked' : '') + '"' + (canDrag ? ' draggable="true" data-drag="' + c.id + '" data-job="' + j.id + '"' : '') + '><div class="nmcell">' + rankBits + '<div><div class="nm">' + esc(c.name) + '</div><div class="nmsub">' + (c.source === 'messaged' ? 'Messaged' : 'Applied') + ' · ' + esc(STAGE_LABEL[c.stage]) + '</div></div></div>' +
         '<span>' + (c.interviewDateTime ? fmtDate(c.interviewDateTime) : '<span class="muted">Not interviewed</span>') + '</span>' +
-        '<span>' + (pe ? scoreHtml(pe.techScore, pe.techMax) : scoreHtml(null)) + '</span>' +
-        '<span>' + (pe ? scoreHtml(pe.behScore, pe.behMax) : scoreHtml(null)) + '</span>' +
+        '<span>' + (pe ? scoreHtml(pe.techScore, pe.techMax, true) : scoreHtml(null)) + '</span>' +
+        '<span>' + (pe ? scoreHtml(pe.behScore, pe.behMax, true) : scoreHtml(null)) + '</span>' +
         '<span class="cmt" title="' + esc(c.decision || '') + '">' + (c.decision ? esc(c.decision) : '<span class="muted">-</span>') + '</span>' +
-        '<button class="more" data-a="more" data-id="' + c.id + '">More</button></div>';
+        '<span class="acts">' + (ranking && isAdmin() ? '<button class="rejbtn" data-a="reject" data-id="' + c.id + '">Reject</button>' : '') +
+        '<button class="more" data-a="more" data-id="' + c.id + '">More</button></span></div>';
     });
     h += '</div></div></div></div>';
     if (canDrag) h += '<p class="hint" style="margin:0 0 6px">Drag the shortlisted candidates (or use the arrows) to rank them. #1 is the top choice.</p>';
@@ -279,16 +279,18 @@
     if (c.decision) h += '<div class="decision"><div class="l">' + esc(c.primaryInterviewer || 'Hesham') + '\'s decision</div>' + esc(c.decision) + '</div>';
 
     if (ev.length) {
+      var hp = primaryEval(c);
+      var who2 = esc(hp ? hp.interviewer.split(' ')[0] : (c.primaryInterviewer || 'Hesham'));
       h += '<div class="minis">' +
-        '<div class="mini"><span class="l">Technical (average)</span><span class="v">' + avg(ev, 'techScore', 'techMax') + '</span></div>' +
-        '<div class="mini"><span class="l">Behavioral (average)</span><span class="v">' + avg(ev, 'behScore', 'behMax') + '</span></div>' +
+        heroScore('Technical (' + who2 + ')', hp && hp.techScore, hp && hp.techMax) +
+        heroScore('Behavioral (' + who2 + ')', hp && hp.behScore, hp && hp.behMax) +
         '<div class="mini"><span class="l">Interviewers</span><span class="v">' + ev.length + '</span></div></div>';
       h += '<div><h3 style="margin-bottom:8px">Who scored what</h3><div class="etable"><div class="scroll"><div class="inner">' +
         '<div class="erow hdr"><span>Interviewer</span><span>Sheet</span><span>Technical</span><span>Behavioral</span><span>Comment</span></div>';
       ev.forEach(function (e) {
         var prim = String(e.interviewer).toLowerCase().indexOf(who) !== -1;
         h += '<div class="erow' + (prim ? ' primary' : '') + '"><span style="font-weight:600">' + esc(e.interviewer) + '</span><span>' + esc(e.sheet || '-') + '</span>' +
-          '<span>' + scoreHtml(e.techScore, e.techMax) + '</span><span>' + scoreHtml(e.behScore, e.behMax) + '</span>' +
+          '<span>' + scoreHtml(e.techScore, e.techMax, prim) + '</span><span>' + scoreHtml(e.behScore, e.behMax, prim) + '</span>' +
           '<span style="color:var(--soft);font-size:13px;line-height:1.45;white-space:pre-wrap">' + esc(e.comment || '') + '</span></div>';
       });
       h += '</div></div></div></div>';
@@ -308,6 +310,12 @@
     if (isAdmin()) h += '<div class="dfoot"><span></span><div class="r"><button class="btn" data-a="edit-cand" data-id="' + c.id + '">Edit candidate</button></div></div>';
     h += '</div></div>';
     modal.innerHTML = h;
+  }
+  function heroScore(label, score, max) {
+    var pct = pctOf(score, max);
+    if (pct == null) return '<div class="mini"><span class="l">' + label + '</span><span class="v">-</span></div>';
+    return '<div class="mini hero ' + band(pct) + '"><span class="l">' + label + '</span><span class="v">' + Math.round(pct) + '%</span>' +
+      (max ? '<span class="s">' + esc(score + ' / ' + max) + '</span>' : '') + '</div>';
   }
   function fact(l, v) { return '<div><div class="l">' + l + '</div>' + (v ? esc(v) : '<span class="muted">-</span>') + '</div>'; }
 
@@ -457,6 +465,14 @@
       return;
     }
     if (!isAdmin()) return;
+    if (a === 'reject') {
+      var rc = candById(id);
+      if (!rc || !confirmText('Reject ' + rc.name + '? They will move from Shortlisted to Rejected.')) return;
+      var dec = String(rc.decision || '').replace(/^\s*Shortlisted\.?\s*/i, '');
+      var body = { stage: rc.interviewDateTime || (rc.evaluations || []).length ? 'rejected_after' : 'rejected_before', decision: 'Rejected. ' + dec };
+      api('PATCH', '/api/candidates/' + id, body).then(function () { toast(rc.name + ' moved to Rejected'); load(); }).catch(function (err) { toast(err.message); });
+      return;
+    }
     if (a === 'new-job') openJobForm(null);
     else if (a === 'edit-job') openJobForm(id);
     else if (a === 'new-cand') openCandForm(null, id);
