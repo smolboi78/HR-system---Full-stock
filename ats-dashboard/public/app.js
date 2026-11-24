@@ -159,6 +159,7 @@
     h += '<header class="head"><div><h1>Recruitment overview</h1><p>Click any number in the table to see the candidates behind it.</p></div><div class="actions">';
     if (isAdmin()) h += '<button class="btn" data-a="new-job">+ New job</button>';
     else h += '<span class="pill view">View only</span>';
+    h += '<button class="btn ghost" data-a="sign-out">Sign out</button>';
     h += '</div></header>';
 
     h += '<section class="kpis" aria-label="Summary">' +
@@ -446,6 +447,7 @@
     }
     if (a === 'close') { state.open = null; render(); return; }
     if (a === 'more') { openDetail(id); return; }
+    if (a === 'sign-out') { clearKey(); state.role = null; showGate(); return; }
     if (a === 'file') { openFile(id, t.getAttribute('data-kind')); return; }
     if (a === 'rank-up' || a === 'rank-down') {
       var jid = t.getAttribute('data-job');
@@ -529,12 +531,8 @@
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.innerHTML) modal.innerHTML = ''; });
 
   // ---------- start ----------
-  // A shared link can carry the key as ?key=... (the view-only link does this);
-  // it is saved and then removed from the address bar.
-  var params = new URLSearchParams(location.search);
-  if (params.get('key')) {
-    setKey(params.get('key'));
-    history.replaceState(null, '', location.pathname);
-  }
+  // Keys are never accepted in the link: everyone types theirs on the sign-in screen.
+  // Strip any old ?key=... link so it does not sit in the address bar or history.
+  if (location.search) history.replaceState(null, '', location.pathname);
   if (getKey()) load(); else showGate();
 })();
