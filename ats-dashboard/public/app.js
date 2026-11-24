@@ -237,7 +237,7 @@
     var list = cands.filter(col.test);
     var ranking = col.key === 'sl';
     if (ranking) list = rankSort(list);
-    var canDrag = ranking && isAdmin() && list.length > 1;
+    var canDrag = ranking && list.length > 1;
     var h = '<tr><td colspan="6" class="panelcell"><div class="panel"><div class="ph"><h3>' + esc(col.label + ' · ' + j.title + ' (' + list.length + ')') + '</h3><div class="tabs">';
     if (isAdmin()) h += '<button class="btn small" data-a="new-cand" data-id="' + j.id + '">+ Add candidate</button>';
     h += '<button class="btn small ghost" data-a="close">Close</button></div></div><div class="list"><div class="tablebox"><div style="min-width:820px">' +
@@ -447,7 +447,6 @@
     if (a === 'close') { state.open = null; render(); return; }
     if (a === 'more') { openDetail(id); return; }
     if (a === 'file') { openFile(id, t.getAttribute('data-kind')); return; }
-    if (!isAdmin()) return;
     if (a === 'rank-up' || a === 'rank-down') {
       var jid = t.getAttribute('data-job');
       var ids = shortlistIds(jid);
@@ -459,6 +458,7 @@
       setTimeout(function () { var b = document.querySelector('[data-a="' + a + '"][data-id="' + id + '"]'); if (b && !b.disabled) b.focus(); }, 0);
       return;
     }
+    if (!isAdmin()) return;
     if (a === 'new-job') openJobForm(null);
     else if (a === 'edit-job') openJobForm(id);
     else if (a === 'new-cand') openCandForm(null, id);

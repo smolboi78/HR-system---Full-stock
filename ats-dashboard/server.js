@@ -146,7 +146,9 @@ app.use('/api', (req, res, next) => {
   if (ADMIN_KEY && safeEqual(provided, ADMIN_KEY)) req.role = 'admin';
   else if (VIEW_KEY && safeEqual(provided, VIEW_KEY)) req.role = 'viewer';
   else return res.status(401).json({ error: 'Missing or invalid access key.' });
-  if (req.method !== 'GET' && req.role !== 'admin') return res.status(403).json({ error: 'This link is view-only.' });
+  // The view-only link can read everything and rank shortlisted candidates, nothing else.
+  const viewerAllowed = req.method === 'PUT' && /^\/jobs\/[^/]+\/shortlist-order$/.test(req.path);
+  if (req.method !== 'GET' && req.role !== 'admin' && !viewerAllowed) return res.status(403).json({ error: 'This link is view-only.' });
   next();
 });
 
