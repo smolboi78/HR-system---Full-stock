@@ -273,6 +273,14 @@ app.patch('/api/candidates/:id', (req, res) => {
   res.json(getCandidate(cur.id));
 });
 
+// Permanently delete a candidate with their scores and files (admin only).
+app.delete('/api/candidates/:id', (req, res) => {
+  if (!db.prepare('SELECT id FROM candidates WHERE id = ?').get(req.params.id)) return res.status(404).json({ error: 'Candidate not found.' });
+  db.prepare('DELETE FROM evaluations WHERE candidateId = ?').run(req.params.id);
+  db.prepare('DELETE FROM candidates WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // Replace a candidate's interviewer scores in one go (from a scorecard report).
 // Rank a job's shortlisted candidates: body { order: [candidateId, ...] }, first = #1.
 app.put('/api/jobs/:id/shortlist-order', (req, res) => {

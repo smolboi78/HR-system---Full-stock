@@ -5,14 +5,14 @@
   var KEY_STORE = 'fullstock-ats-key';
   var STATUS_LABEL = { open: 'Open', on_hold: 'On hold', closed: 'Closed' };
   var STAGE_LABEL = {
-    applied: 'Applied / Messaged',
+    applied: 'Approved for Interview',
     interviewed: 'Interviewed',
     shortlisted: 'Shortlisted',
     rejected_before: 'Rejected before interview',
     rejected_after: 'Rejected after interview'
   };
   var COLS = [
-    { key: 'all', label: 'Applied / Messaged', test: function () { return true; } },
+    { key: 'all', label: 'Approved for Interview', test: function () { return true; } },
     { key: 'int', label: 'Interviewed', test: function (c) { return c.stage === 'interviewed' || c.stage === 'shortlisted' || c.stage === 'rejected_after'; } },
     { key: 'sl', label: 'Shortlisted', test: function (c) { return c.stage === 'shortlisted'; } },
     { key: 'rej', label: 'Rejected', test: function (c) { return c.stage === 'rejected_before' || c.stage === 'rejected_after'; } }
@@ -163,7 +163,7 @@
 
     h += '<section class="kpis" aria-label="Summary">' +
       kpi('Open jobs', openJobs, jobs.length + (jobs.length === 1 ? ' job' : ' jobs') + ' in total, ' + onHold + ' on hold') +
-      kpi('Applied / Messaged', all.length, (all.length - msg) + ' applied · ' + msg + ' messaged') +
+      kpi('Approved for Interview', all.length, (all.length - msg) + ' applied · ' + msg + ' messaged') +
       kpi('Interviewed', intv, all.length ? Math.round(intv / all.length * 100) + '% of everyone who came in' : 'No candidates yet') +
       '<div class="kpi dark"><span class="l">Shortlisted</span><span class="v">' + sl + '</span><span class="s">out of ' + intv + ' interviewed</span></div>' +
       kpi('Rejected', cnt(COLS[3].test), 'closed out at any stage') +
@@ -257,6 +257,7 @@
         '<span>' + rawScore(pe && pe.behScore, pe && pe.behMax) + '</span>' +
         '<span class="cmt" title="' + esc(c.decision || '') + '">' + (c.decision ? esc(c.decision) : '<span class="muted">-</span>') + '</span>' +
         '<span class="acts">' + (ranking && isAdmin() ? '<button class="rejbtn" data-a="reject" data-id="' + c.id + '">Reject</button>' : '') +
+        (col.key === 'all' && isAdmin() ? '<button class="rejbtn" data-a="delete-cand" data-id="' + c.id + '" aria-label="Delete ' + esc(c.name) + '">Delete</button>' : '') +
         '<button class="more" data-a="more" data-id="' + c.id + '">More</button></span></div>';
     });
     h += '</div></div></div></div>';
@@ -480,6 +481,12 @@
       return;
     }
     if (!isAdmin()) return;
+    if (a === 'delete-cand') {
+      var dc = candById(id);
+      if (!dc || !confirmText('Delete ' + dc.name + ' permanently? Their CV, scorecard report and scores will be deleted too. This cannot be undone.')) return;
+      api('DELETE', '/api/candidates/' + id).then(function () { toast(dc.name + ' deleted'); load(); }).catch(function (err) { toast(err.message); });
+      return;
+    }
     if (a === 'reject') {
       var rc = candById(id);
       if (!rc || !confirmText('Reject ' + rc.name + '? They will move from Shortlisted to Rejected.')) return;
