@@ -250,10 +250,11 @@
             '<button type="button" class="mvbtn" data-a="rank-down" data-id="' + c.id + '" data-job="' + j.id + '" aria-label="Move ' + esc(c.name) + ' down"' + (idx === list.length - 1 ? ' disabled' : '') + '>' + DOWN + '</button></span>';
         }
       }
-      h += '<div class="lrow' + (ranking ? ' ranked' : '') + '"' + (canDrag ? ' draggable="true" data-drag="' + c.id + '" data-job="' + j.id + '"' : '') + '><div class="nmcell">' + rankBits + '<div><div class="nm">' + esc(c.name) + '</div><div class="nmsub">' + (c.source === 'messaged' ? 'Messaged' : 'Applied') + ' · ' + esc(STAGE_LABEL[c.stage]) + '</div></div></div>' +
+      var rb = rowBand(pe);
+      h += '<div class="lrow' + (ranking ? ' ranked' : '') + (rb ? ' band-' + rb : '') + '"' + (rb ? ' title="Hesham overall: ' + Math.round(heshamOverall(pe)) + '%"' : '') + (canDrag ? ' draggable="true" data-drag="' + c.id + '" data-job="' + j.id + '"' : '') + '><div class="nmcell">' + rankBits + '<div><div class="nm">' + esc(c.name) + '</div><div class="nmsub">' + (c.source === 'messaged' ? 'Messaged' : 'Applied') + ' · ' + esc(STAGE_LABEL[c.stage]) + '</div></div></div>' +
         '<span>' + (c.interviewDateTime ? fmtDate(c.interviewDateTime) : '<span class="muted">Not interviewed</span>') + '</span>' +
-        '<span>' + (pe ? scoreHtml(pe.techScore, pe.techMax, true) : scoreHtml(null)) + '</span>' +
-        '<span>' + (pe ? scoreHtml(pe.behScore, pe.behMax, true) : scoreHtml(null)) + '</span>' +
+        '<span>' + rawScore(pe && pe.techScore, pe && pe.techMax) + '</span>' +
+        '<span>' + rawScore(pe && pe.behScore, pe && pe.behMax) + '</span>' +
         '<span class="cmt" title="' + esc(c.decision || '') + '">' + (c.decision ? esc(c.decision) : '<span class="muted">-</span>') + '</span>' +
         '<span class="acts">' + (ranking && isAdmin() ? '<button class="rejbtn" data-a="reject" data-id="' + c.id + '">Reject</button>' : '') +
         '<button class="more" data-a="more" data-id="' + c.id + '">More</button></span></div>';
@@ -311,6 +312,20 @@
     h += '</div></div>';
     modal.innerHTML = h;
   }
+  // Row scores stay as raw points (e.g. 34 / 48).
+  function rawScore(score, max) {
+    if (score == null) return '<span class="muted">-</span>';
+    return '<span class="rawpts">' + esc(max ? score + ' / ' + max : String(score)) + '</span>';
+  }
+  // Hesham's overall % = (technical + behavioral points) / (technical + behavioral max).
+  function heshamOverall(pe) {
+    if (!pe) return null;
+    var got = 0, max = 0;
+    if (pe.techScore != null && pe.techMax) { got += pe.techScore; max += pe.techMax; }
+    if (pe.behScore != null && pe.behMax) { got += pe.behScore; max += pe.behMax; }
+    return max ? got / max * 100 : null;
+  }
+  function rowBand(pe) { var p = heshamOverall(pe); return p == null ? '' : band(p); }
   function heroScore(label, score, max) {
     var pct = pctOf(score, max);
     if (pct == null) return '<div class="mini"><span class="l">' + label + '</span><span class="v">-</span></div>';
