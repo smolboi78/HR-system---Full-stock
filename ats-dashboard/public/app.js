@@ -250,8 +250,8 @@
             '<button type="button" class="mvbtn" data-a="rank-down" data-id="' + c.id + '" data-job="' + j.id + '" aria-label="Move ' + esc(c.name) + ' down"' + (idx === list.length - 1 ? ' disabled' : '') + '>' + DOWN + '</button></span>';
         }
       }
-      var rb = rowBand(pe);
-      h += '<div class="lrow' + (ranking ? ' ranked' : '') + (rb ? ' band-' + rb : '') + '"' + (rb ? ' title="Hesham overall: ' + Math.round(heshamOverall(pe)) + '%"' : '') + (canDrag ? ' draggable="true" data-drag="' + c.id + '" data-job="' + j.id + '"' : '') + '><div class="nmcell">' + rankBits + '<div><div class="nm">' + esc(c.name) + '</div><div class="nmsub">' + (c.source === 'messaged' ? 'Messaged' : 'Applied') + ' · ' + esc(STAGE_LABEL[c.stage]) + '</div></div></div>' +
+      var rb = rowBand(pe, c);
+      h += '<div class="lrow' + (ranking ? ' ranked' : '') + (rb ? ' band-' + rb : '') + '"' + (rb && !c.rowColor ? ' title="Hesham overall: ' + Math.round(heshamOverall(pe)) + '%"' : '') + (canDrag ? ' draggable="true" data-drag="' + c.id + '" data-job="' + j.id + '"' : '') + '><div class="nmcell">' + rankBits + '<div><div class="nm">' + esc(c.name) + '</div><div class="nmsub">' + (c.source === 'messaged' ? 'Messaged' : 'Applied') + ' · ' + esc(STAGE_LABEL[c.stage]) + '</div></div></div>' +
         '<span>' + (c.interviewDateTime ? fmtDate(c.interviewDateTime) : '<span class="muted">Not interviewed</span>') + '</span>' +
         '<span>' + rawScore(pe && pe.techScore, pe && pe.techMax) + '</span>' +
         '<span>' + rawScore(pe && pe.behScore, pe && pe.behMax) + '</span>' +
@@ -326,7 +326,11 @@
     if (pe.behScore != null && pe.behMax) { got += pe.behScore; max += pe.behMax; }
     return max ? got / max * 100 : null;
   }
-  function rowBand(pe) { var p = heshamOverall(pe); return p == null ? '' : band(p); }
+  // A colour set by hand wins; otherwise it comes from Hesham's overall %.
+  function rowBand(pe, c) {
+    if (c && c.rowColor) return c.rowColor;
+    var p = heshamOverall(pe); return p == null ? '' : band(p);
+  }
   function heroScore(label, score, max) {
     var pct = pctOf(score, max);
     if (pct == null) return '<div class="mini"><span class="l">' + label + '</span><span class="v">-</span></div>';
@@ -393,6 +397,7 @@
       sel('stage', 'Stage', c.stage, Object.keys(STAGE_LABEL).map(function (k) { return [k, STAGE_LABEL[k]]; })) +
       field('interviewDateTime', 'Interview date and time', dt, 'datetime-local') +
       field('primaryInterviewer', 'Scores shown on the row come from', c.primaryInterviewer) +
+      sel('rowColor', 'Row colour', c.rowColor || '', [['', 'Automatic (from Hesham\'s score)'], ['g', 'Green'], ['y', 'Yellow'], ['r', 'Red']]) +
       field('phone', 'Phone', c.phone, 'tel') + field('email', 'Email', c.email, 'email') +
       field('linkedinUrl', 'LinkedIn link', c.linkedinUrl, 'url', true) +
       '<div class="f wide"><label for="f-decision">Hesham\'s decision (shown as the comment)</label><textarea id="f-decision" name="decision">' + esc(c.decision || '') + '</textarea></div>' +
@@ -409,7 +414,7 @@
       e.preventDefault();
       var g = function (n) { var el = form.elements[n]; return el ? el.value : ''; };
       var body = {};
-      ['name', 'jobId', 'source', 'stage', 'interviewDateTime', 'primaryInterviewer', 'phone', 'email', 'linkedinUrl', 'decision', 'notes'].forEach(function (k) { body[k] = g(k); });
+      ['name', 'jobId', 'source', 'stage', 'interviewDateTime', 'primaryInterviewer', 'rowColor', 'phone', 'email', 'linkedinUrl', 'decision', 'notes'].forEach(function (k) { body[k] = g(k); });
       body.evaluations = Array.prototype.map.call(form.querySelectorAll('.evrow'), function (r) {
         var q = function (n) { return r.querySelector('[data-f="' + n + '"]').value; };
         return { interviewer: q('interviewer'), sheet: q('sheet'), techScore: q('techScore'), techMax: q('techMax'), behScore: q('behScore'), behMax: q('behMax'), comment: q('comment') };

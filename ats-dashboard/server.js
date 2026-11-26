@@ -79,6 +79,7 @@ db.exec(`
 // Non-destructive migrations for columns added after launch.
 const candCols = db.prepare('PRAGMA table_info(candidates)').all().map((c) => c.name);
 if (!candCols.includes('shortlistRank')) db.exec('ALTER TABLE candidates ADD COLUMN shortlistRank INTEGER');
+if (!candCols.includes('rowColor')) db.exec('ALTER TABLE candidates ADD COLUMN rowColor TEXT');
 
 const now = () => new Date().toISOString();
 const newId = () => crypto.randomUUID();
@@ -91,7 +92,7 @@ const num = (v) => {
 
 const JOB_COLS = 'id, title, department, location, hiringManager, dateOpened, status, archived, createdAt, updatedAt';
 const CAND_COLS = `id, jobId, name, phone, email, source, linkedinUrl, notes, stage, interviewDateTime, decision,
-  primaryInterviewer, shortlistRank, cvFileName, reportFileName, archived, createdAt, updatedAt,
+  primaryInterviewer, shortlistRank, rowColor, cvFileName, reportFileName, archived, createdAt, updatedAt,
   (cvBase64 IS NOT NULL) AS hasCv, (reportBase64 IS NOT NULL) AS hasReport`;
 
 function jobOut(r) {
@@ -267,6 +268,11 @@ app.patch('/api/candidates/:id', (req, res) => {
     decision=?, primaryInterviewer=?, cvFileName=?, cvBase64=?, reportFileName=?, reportBase64=?, archived=?, updatedAt=? WHERE id=?`).run(
     next.jobId, next.name, next.phone, next.email, next.source, next.linkedinUrl, next.notes, next.stage, next.interviewDateTime,
     next.decision, next.primaryInterviewer, next.cvFileName, next.cvBase64, next.reportFileName, next.reportBase64, next.archived, now(), cur.id);
+  // Manual row colour: 'g' | 'y' | 'r', or empty for automatic (from Hesham's scores).
+  if ('rowColor' in b) {
+    const rc = ['g', 'y', 'r'].includes(b.rowColor) ? b.rowColor : null;
+    db.prepare('UPDATE candidates SET rowColor = ? WHERE id = ?').run(rc, cur.id);
+  }
   // Leaving the shortlist drops the candidate's rank so a later re-shortlist starts at the bottom.
   if (next.stage !== 'shortlisted') db.prepare('UPDATE candidates SET shortlistRank = NULL WHERE id = ?').run(cur.id);
   if (Array.isArray(b.evaluations)) replaceEvaluations(cur.id, b.evaluations);
